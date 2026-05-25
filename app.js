@@ -17,6 +17,7 @@ const fmtMoney = (value) =>
 
 const fmtNum = (value) => new Intl.NumberFormat("en-US").format(value || 0);
 const fmtPct = (value) => `${value > 0 ? "+" : ""}${(value || 0).toFixed(1)}%`;
+const fmtMaybePct = (value) => (Number.isFinite(value) ? fmtPct(value) : "n/a");
 const fmtShort = (value) =>
   new Intl.NumberFormat("en-US", {
     notation: "compact",
@@ -191,6 +192,24 @@ function aggregateRowsByType(rows) {
   }));
 }
 
+function summarizePriceBandsFromRows(rows) {
+  const map = new Map(priceBandOrder.map((band) => [band, { band, gmv: 0, orders: 0, buyers: new Set() }]));
+  rows.forEach((row) => {
+    const item = map.get(row.price_band);
+    if (!item) return;
+    item.gmv += row.price;
+    item.orders += 1;
+    if (row.buyer) item.buyers.add(row.buyer);
+  });
+  return [...map.values()].map((item) => ({
+    band: item.band,
+    gmv: item.gmv,
+    orders: item.orders,
+    buyers: item.buyers.size,
+    aov: item.orders ? item.gmv / item.orders : 0,
+  }));
+}
+
 function groupWeeklyPriceBands(rows) {
   const weeks = state.data.weekly.map((week) => week.week);
   const map = new Map();
@@ -292,16 +311,98 @@ function latestWeek() {
   return state.data.weekly[state.data.weekly.length - 1];
 }
 
-function renderKpis(rows) {
+function focusWeekLabel() {
+  return state.week === "all" ? latestWeek().week : state.week;
+}
+
+function weekMeta(label) {
+  return state.data.weekly.find((week) => week.week === label);
+}
+
+function weekIndex(label) {
+  return state.data.weekly.findIndex((week) => week.week === label);
+}
+
+function isUnfilteredView() {
+  return state.priceBand === "all" && state.buyerType === "all" && !state.query;
+}
+
+function weeklyStatsFromRows(rows) {
+  const weekly = state.data.weekly.map((meta) => {
+    const wr = rows.filter((row) => row.week === meta.week);
+    const metrics = aggregateRows(wr);
+    return {
+      ...meta,
+      gmv: metrics.gmv,
+      orders: metrics.orders,
+      buyers: metrics.buyers,
+      aov: metrics.aov,
+      orders_per_buyer: metrics.ordersPerBuyer,
+      repeat_rate: metrics.repeatRate,
+    };
+  });
+
+  weekly.forEach((item, index) => {
+    const previous = weekly[index - 1];
+    if (previous && previous.gmv) {
+      item.wow_gmv_pct = ((item.gmv - previous.gmv) / previous.gmv) * 100;
+    } else if (index === 0 && isUnfilteredView()) {
+      item.wow_gmv_pct = weekMeta(item.week)?.wow_gmv_pct ?? null;
+    } else {
+      item.wow_gmv_pct = null;
+    }
+  });
+
+  return weekly;
+}
+
+function focusWeekContext(comparisonRows) {
+  const label = focusWeekLabel();
+  const meta = weekMeta(label);
+  const index = weekIndex(label);
+  const focusRows = comparisonRows.filter((row) => row.week === label);
+  const focusMetrics = aggregateRows(focusRows);
+  const hours = meta?.stream_hours || 0;
+  const gmvPerHour = hours ? focusMetrics.gmv / hours : 0;
+
+  let prevLabel = null;
+  let prevGmv = null;
+  let wowPct = null;
+  if (index > 0) {
+    prevLabel = state.data.weekly[index - 1].week;
+    prevGmv = comparisonRows
+      .filter((row) => row.week === prevLabel)
+      .reduce((sum, row) => sum + row.price, 0);
+    wowPct = prevGmv ? ((focusMetrics.gmv - prevGmv) / prevGmv) * 100 : null;
+  } else if (isUnfilteredView() && meta) {
+    prevLabel = state.data.baseline_week?.label || "prior week";
+    prevGmv = state.data.baseline_week?.gmv || null;
+    wowPct = meta.wow_gmv_pct;
+  }
+
+  return {
+    label,
+    metrics: focusMetrics,
+    hours,
+    gmvPerHour,
+    prevLabel,
+    prevGmv,
+    wowPct,
+    delta: Number.isFinite(prevGmv) ? focusMetrics.gmv - prevGmv : null,
+  };
+}
+
+function renderKpis(rows, comparisonRows) {
   const metrics = aggregateRows(rows);
-  const latest = latestWeek();
+  const focus = focusWeekContext(comparisonRows);
+  const wowLabel = state.week === "all" ? "Latest WoW" : "Selected WoW";
   const cards = [
     ["GMV", fmtMoney(metrics.gmv), state.week === "all" ? "Filtered rolling period" : state.week],
     ["Orders", fmtNum(metrics.orders), `${metrics.ordersPerBuyer.toFixed(2)} orders / buyer`],
     ["Buyer Count", fmtNum(metrics.buyers), `${metrics.repeatRate.toFixed(1)}% repeat rate`],
     ["AOV", fmtMoney(metrics.aov), "Average sold price"],
-    ["Latest WoW", fmtPct(latest.wow_gmv_pct), `${latest.week} vs prior week`, latest.wow_gmv_pct < 0],
-    ["GMV/hr", fmtMoney(latest.gmv_per_hour), `${latest.stream_hours.toFixed(1)} stream hours`],
+    [wowLabel, fmtMaybePct(focus.wowPct), `${focus.label} vs ${focus.prevLabel || "prior week"}`, focus.wowPct < 0],
+    ["GMV/hr", fmtMoney(focus.gmvPerHour), `${focus.label} · ${focus.hours.toFixed(1)} stream hours`],
   ];
 
   document.querySelector("#kpiGrid").replaceChildren(
@@ -333,26 +434,28 @@ function renderActiveFilters() {
   );
 }
 
-function renderInsights(rows) {
-  const latest = latestWeek();
-  const latestBand = [...state.data.price_bands_latest].sort((a, b) => b.gmv - a.gmv)[0];
+function renderInsights(rows, comparisonRows) {
+  const focus = focusWeekContext(comparisonRows);
+  const bandLeader = [...summarizePriceBandsFromRows(rows)].sort((a, b) => b.gmv - a.gmv)[0];
   const metrics = aggregateRows(rows);
-  const prior = state.data.weekly[state.data.weekly.length - 2];
-  const delta = latest.gmv - prior.gmv;
-  const tone = latest.wow_gmv_pct < 0 ? "negative" : "positive";
+  const tone = focus.wowPct < 0 ? "negative" : "positive";
   const insights = [
     {
       mark: "GMV",
-      label: "Latest weekly movement",
-      value: `${fmtPct(latest.wow_gmv_pct)} WoW`,
-      detail: `${latest.week} changed ${fmtMoney(delta)} from ${prior.week}.`,
+      label: state.week === "all" ? "Latest weekly movement" : "Selected weekly movement",
+      value: `${fmtMaybePct(focus.wowPct)} WoW`,
+      detail: Number.isFinite(focus.delta)
+        ? `${focus.label} changed ${fmtMoney(focus.delta)} from ${focus.prevLabel}.`
+        : `${focus.label} has no comparable prior filtered week.`,
       tone,
     },
     {
       mark: "PB",
-      label: "Current CPI-band leader",
-      value: latestBand.band,
-      detail: `${fmtMoney(latestBand.gmv)} GMV from target-price band, ${fmtNum(latestBand.orders)} orders in the latest week.`,
+      label: "Active CPI-band leader",
+      value: bandLeader?.band || "n/a",
+      detail: bandLeader
+        ? `${fmtMoney(bandLeader.gmv)} GMV and ${fmtNum(bandLeader.orders)} orders under current filters.`
+        : "No CPI-band rows under current filters.",
       tone: "warm",
     },
     {
@@ -550,19 +653,20 @@ function drawLegend(svg, items, x, y, maxWidth = 760) {
   });
 }
 
-function drawWeeklyGmv() {
+function drawWeeklyGmv(rows) {
   const svg = chartScaffold("#weeklyGmvChart", "0 0 940 390", "Weekly GMV with WoW trend line");
   addDefs(svg);
-  const data = state.data.weekly;
+  const data = weeklyStatsFromRows(rows);
   const left = 92;
   const top = 38;
   const width = 760;
   const height = 250;
-  const max = Math.ceil(Math.max(...data.map((d) => d.gmv)) / 10000) * 10000;
+  const max = Math.max(Math.ceil(Math.max(...data.map((d) => d.gmv), 1) / 10000) * 10000, 1);
   drawGrid(svg, left, top, width, height, 4, max, fmtMoney);
   const barW = 88;
   const points = [];
-  const wowAbs = Math.max(100, Math.max(...data.map((d) => Math.abs(d.wow_gmv_pct))) * 1.4);
+  const wowValues = data.map((d) => d.wow_gmv_pct).filter(Number.isFinite);
+  const wowAbs = Math.max(100, Math.max(...wowValues.map((value) => Math.abs(value)), 0) * 1.4);
 
   data.forEach((d, i) => {
     const x = left + (width * (i + 0.5)) / data.length;
@@ -570,7 +674,7 @@ function drawWeeklyGmv() {
     const y = top + height - h;
     const rect = svgEl("rect", { x: x - barW / 2, y, width: barW, height: h, rx: 12, fill: "url(#barGrad)" });
     animateRect(rect);
-    attachTooltip(rect, `<strong>${escapeHtml(d.week)}</strong><br>GMV ${fmtMoney(d.gmv)}<br>WoW ${fmtPct(d.wow_gmv_pct)}`);
+    attachTooltip(rect, `<strong>${escapeHtml(d.week)}</strong><br>GMV ${fmtMoney(d.gmv)}<br>WoW ${fmtMaybePct(d.wow_gmv_pct)}`);
     svg.append(rect);
 
     const label = svgEl("text", { x, y: top + height + 28, "text-anchor": "middle", class: "axis-label" });
@@ -581,7 +685,8 @@ function drawWeeklyGmv() {
     value.textContent = fmtShort(d.gmv);
     svg.append(value);
 
-    const wy = top + height / 2 - (d.wow_gmv_pct / wowAbs) * (height / 2);
+    const wowValue = Number.isFinite(d.wow_gmv_pct) ? d.wow_gmv_pct : 0;
+    const wy = top + height / 2 - (wowValue / wowAbs) * (height / 2);
     points.push([x, wy, d]);
   });
 
@@ -598,7 +703,7 @@ function drawWeeklyGmv() {
 
   points.forEach(([x, y, d]) => {
     const dot = animatedDot({ cx: x, cy: y, r: 7, fill: "#dc5b42", stroke: "#fffaf4", "stroke-width": 3 });
-    attachTooltip(dot, `<strong>${escapeHtml(d.week)} WoW</strong><br>${fmtPct(d.wow_gmv_pct)}<br>GMV ${fmtMoney(d.gmv)}`);
+    attachTooltip(dot, `<strong>${escapeHtml(d.week)} WoW</strong><br>${fmtMaybePct(d.wow_gmv_pct)}<br>GMV ${fmtMoney(d.gmv)}`);
     svg.append(dot);
   });
 
@@ -630,6 +735,10 @@ function drawBarChart(target, rows, key, valueKey, color = "#f97316", formatter 
     labelNode.textContent = d[key];
     svg.append(labelNode);
   });
+
+  const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
+  note.textContent = state.week === "all" ? "Current filters: rolling 4 weeks" : `Current filters: ${state.week}`;
+  svg.append(note);
 }
 
 function drawPriceBandStacked(rows) {
@@ -716,8 +825,19 @@ function drawPriceBandShare(rows) {
   });
 }
 
-function drawStackedNewReturning() {
+function drawStackedNewReturning(rows) {
   const svg = chartScaffold("#newReturningChart", "0 0 940 390", "New and returning customer GMV split");
+  const data = groupWeeklyBuyerTypes(rows).map((week) => {
+    const newType = week.types.find((type) => type.buyerType === "new") || { gmvPct: 0 };
+    const returningType = week.types.find((type) => type.buyerType === "returning") || { gmvPct: 0 };
+    return {
+      week: week.week,
+      new_gmv_pct: newType.gmvPct,
+      returning_gmv_pct: returningType.gmvPct,
+      new_gmv: newType.gmv || 0,
+      returning_gmv: returningType.gmv || 0,
+    };
+  });
   const left = 128;
   const top = 42;
   const width = 680;
@@ -727,7 +847,7 @@ function drawStackedNewReturning() {
     { label: "Returning GMV", color: "#9a5a2e", width: 150 },
   ], left, 342);
 
-  state.data.weekly.forEach((d, i) => {
+  data.forEach((d, i) => {
     const y = top + i * 64;
     const newW = (d.new_gmv_pct / 100) * width;
     const weekLabel = svgEl("text", { x: left - 10, y: y + 25, "text-anchor": "end", class: "axis-label" });
@@ -737,12 +857,12 @@ function drawStackedNewReturning() {
 
     const newRect = svgEl("rect", { x: left, y, width: newW, height: rowH, rx: 10, fill: "#f97316" });
     animateRect(newRect, "x");
-    attachTooltip(newRect, `<strong>${escapeHtml(d.week)} new GMV</strong><br>${d.new_gmv_pct.toFixed(1)}% of GMV`);
+    attachTooltip(newRect, `<strong>${escapeHtml(d.week)} new GMV</strong><br>${d.new_gmv_pct.toFixed(1)}% of GMV<br>${fmtMoney(d.new_gmv)}`);
     svg.append(newRect);
 
     const returningRect = svgEl("rect", { x: left + newW, y, width: width - newW, height: rowH, rx: 10, fill: "#9a5a2e" });
     animateRect(returningRect, "x");
-    attachTooltip(returningRect, `<strong>${escapeHtml(d.week)} returning GMV</strong><br>${d.returning_gmv_pct.toFixed(1)}% of GMV`);
+    attachTooltip(returningRect, `<strong>${escapeHtml(d.week)} returning GMV</strong><br>${d.returning_gmv_pct.toFixed(1)}% of GMV<br>${fmtMoney(d.returning_gmv)}`);
     svg.append(returningRect);
 
     const pctLabel = svgEl("text", { x: left + width + 16, y: y + 30, class: "axis-label" });
@@ -751,14 +871,14 @@ function drawStackedNewReturning() {
   });
 }
 
-function drawBuyerRepeat() {
+function drawBuyerRepeat(rows) {
   const svg = chartScaffold("#buyerRepeatChart", "0 0 940 390", "Buyer count with repeat-rate line");
-  const data = state.data.weekly;
+  const data = weeklyStatsFromRows(rows);
   const left = 92;
   const top = 38;
   const width = 760;
   const height = 260;
-  const maxBuyers = Math.ceil(Math.max(...data.map((d) => d.buyers)) / 500) * 500;
+  const maxBuyers = Math.max(Math.ceil(Math.max(...data.map((d) => d.buyers), 1) / 500) * 500, 1);
   drawGrid(svg, left, top, width, height, 4, maxBuyers, fmtNum);
   const barW = 88;
   const points = [];
@@ -798,8 +918,8 @@ function drawBuyerRepeat() {
   svg.append(note);
 }
 
-function drawConversion() {
-  const rows = state.data.weekly.map((d) => ({
+function drawConversion(rows) {
+  const weekly = weeklyStatsFromRows(rows).map((d) => ({
     week: d.week,
     buyersPerHour: d.stream_hours ? d.buyers / d.stream_hours : 0,
     ordersPerHour: d.stream_hours ? d.orders / d.stream_hours : 0,
@@ -809,12 +929,12 @@ function drawConversion() {
   const top = 38;
   const width = 760;
   const height = 260;
-  const max = Math.ceil(Math.max(...rows.map((d) => d.ordersPerHour)) / 20) * 20;
+  const max = Math.ceil(Math.max(...weekly.map((d) => d.ordersPerHour), 1) / 20) * 20;
   drawGrid(svg, left, top, width, height, 4, max, (v) => `${v.toFixed(0)}/h`);
 
   const line = (field, color, label) => {
-    const points = rows.map((d, i) => {
-      const x = left + (width * (i + 0.5)) / rows.length;
+    const points = weekly.map((d, i) => {
+      const x = left + (width * (i + 0.5)) / weekly.length;
       const y = top + height - (d[field] / max) * height;
       return [x, y, d];
     });
@@ -840,8 +960,8 @@ function drawConversion() {
     { label: "Orders/hr", color: "#dc5b42", width: 112 },
     { label: "Buyers/hr", color: "#9a5a2e", width: 112 },
   ], left, 354);
-  rows.forEach((d, i) => {
-    const x = left + (width * (i + 0.5)) / rows.length;
+  weekly.forEach((d, i) => {
+    const x = left + (width * (i + 0.5)) / weekly.length;
     const weekLabel = svgEl("text", { x, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
     weekLabel.textContent = d.week;
     svg.append(weekLabel);
@@ -991,19 +1111,20 @@ function renderTable(rows) {
 
 function render() {
   const rows = getCurrentRows();
-  const rollingRows = getFilteredRows({ ignoreWeek: true });
+  const comparisonRows = getFilteredRows({ ignoreWeek: true });
+  const rollingRows = comparisonRows;
   const buyerComparisonRows = getFilteredRows({ ignoreWeek: true, ignoreBuyerType: true });
   renderActiveFilters();
-  renderKpis(rows);
-  renderInsights(rows);
-  drawWeeklyGmv();
-  drawBarChart("#priceBandChart", state.data.price_bands_latest, "band", "gmv", "#f97316", fmtMoney, "Latest-week GMV by CPI target band");
+  renderKpis(rows, comparisonRows);
+  renderInsights(rows, comparisonRows);
+  drawWeeklyGmv(comparisonRows);
+  drawBarChart("#priceBandChart", summarizePriceBandsFromRows(rows), "band", "gmv", "#f97316", fmtMoney, "GMV by CPI target band under current filters");
   drawPriceBandStacked(rollingRows);
   drawPriceBandShare(rollingRows);
-  drawStackedNewReturning();
+  drawStackedNewReturning(buyerComparisonRows);
   drawNewReturningAovFrequency(buyerComparisonRows);
-  drawBuyerRepeat();
-  drawConversion();
+  drawBuyerRepeat(comparisonRows);
+  drawConversion(comparisonRows);
   renderNewReturningTable(buyerComparisonRows);
   renderTable(rows);
   requestAnimationFrame(replayChartAnimations);
