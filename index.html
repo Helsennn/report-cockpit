@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>36SShome Weekly Performance Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#mainDashboard">Skip to dashboard</a>
+    <div class="loading" id="loadingState" role="status" aria-live="polite">
+      <div class="loading-card">
+        <div class="spinner"></div>
+        <span>Loading dashboard data...</span>
+      </div>
+    </div>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">
+            <img src="./brand-logo.jpeg" alt="36 Sample Sale logo" />
+          </div>
+          <div>
+            <h1>Home Ops</h1>
+            <p>Weekly performance cockpit</p>
+          </div>
+        </div>
+
+        <form class="filters" aria-label="Dashboard filters">
+          <section class="control-group">
+            <label for="weekFilter">Week</label>
+            <select id="weekFilter"></select>
+          </section>
+
+          <section class="control-group">
+            <label for="priceBandFilter">CPI / target band</label>
+            <select id="priceBandFilter"></select>
+          </section>
+
+          <section class="control-group">
+            <label for="buyerTypeFilter">Buyer type</label>
+            <select id="buyerTypeFilter">
+              <option value="all">All buyers</option>
+              <option value="new">New buyers</option>
+              <option value="returning">Returning buyers</option>
+            </select>
+          </section>
+
+          <section class="control-group">
+            <label for="productSearch">Product search</label>
+            <input id="productSearch" type="search" placeholder="camera, kit, fan..." />
+          </section>
+        </form>
+
+        <section class="active-filters" aria-label="Active filters">
+          <span>Active view</span>
+          <div id="activeFilters"></div>
+        </section>
+
+        <section class="note">
+          <span>Source</span>
+          <p id="sourceNote">Loading data...</p>
+        </section>
+      </aside>
+
+      <main class="dashboard" id="mainDashboard">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">36SShome · Rolling 4 Weeks</p>
+            <h2>GMV, Buyers, CPI Bands & Retention</h2>
+          </div>
+          <div class="date-pill" id="generatedAt">Updated</div>
+        </header>
+
+        <section class="insight-grid" id="insightGrid" aria-label="Key insights"></section>
+
+        <section class="kpi-grid" id="kpiGrid"></section>
+
+        <section class="chart-grid">
+          <article class="panel wide">
+            <div class="panel-head">
+              <div>
+                <h3>Weekly GMV & WoW</h3>
+                <p>Bars show GMV, line shows week-over-week change.</p>
+              </div>
+            </div>
+            <div class="chart" id="weeklyGmvChart" role="img" aria-label="Weekly GMV and week-over-week change chart"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>This Week GMV by CPI Band</h3>
+                <p>Target-price bands carrying the week.</p>
+              </div>
+            </div>
+            <div class="chart" id="priceBandChart" role="img" aria-label="Latest week GMV by CPI target band chart"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Rolling 4W CPI Band GMV</h3>
+                <p>Stacked weekly GMV by target-price band.</p>
+              </div>
+            </div>
+            <div class="chart" id="priceBandStackChart" role="img" aria-label="Rolling four week stacked GMV by CPI target band chart"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Rolling 4W CPI Band Mix %</h3>
+                <p>Each week normalized to 100% GMV mix by target-price band.</p>
+              </div>
+            </div>
+            <div class="chart" id="priceBandShareChart" role="img" aria-label="Rolling four week CPI target band percentage mix chart"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>New vs Returning GMV %</h3>
+                <p>Four-week acquisition and retention mix.</p>
+              </div>
+            </div>
+            <div class="chart" id="newReturningChart" role="img" aria-label="New versus returning GMV percentage chart"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>New vs Returning AOV + Frequency</h3>
+                <p>AOV and order-frequency trends use separate scales by buyer type.</p>
+              </div>
+            </div>
+            <div class="chart tall" id="newReturningAovFreqChart" role="img" aria-label="New versus returning AOV and order frequency chart"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Buyer Count & Repeat Rate</h3>
+                <p>Unique buyers plus same-week repeat buyer share.</p>
+              </div>
+            </div>
+            <div class="chart" id="buyerRepeatChart" role="img" aria-label="Buyer count and repeat rate chart"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>Weekly Conversion Proxy</h3>
+                <p>Buyers/hr and orders/hr from stream-hour estimates.</p>
+              </div>
+            </div>
+            <div class="chart" id="conversionChart" role="img" aria-label="Weekly orders per hour and buyers per hour chart"></div>
+          </article>
+        </section>
+
+        <section class="table-section">
+          <article class="panel table-panel split-table">
+            <div class="panel-head">
+              <div>
+                <h3>New vs Returning Detail</h3>
+                <p id="newReturningCaption">Weekly GMV, order, buyer, AOV and frequency by buyer type.</p>
+              </div>
+            </div>
+            <div class="table-wrap compact">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Week</th>
+                    <th>Buyer type</th>
+                    <th>GMV</th>
+                    <th>GMV %</th>
+                    <th>Orders</th>
+                    <th>Buyers</th>
+                    <th>AOV</th>
+                    <th>Frequency</th>
+                  </tr>
+                </thead>
+                <tbody id="newReturningTable"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel table-panel">
+            <div class="panel-head">
+              <div>
+                <h3>Product Leaders</h3>
+                <p id="tableCaption">Top products by GMV under current filters.</p>
+              </div>
+              <button id="resetFilters" type="button">Reset</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th><button class="sort-button" type="button" data-sort="product">Product</button></th>
+                    <th><button class="sort-button" type="button" data-sort="gmv">GMV</button></th>
+                    <th><button class="sort-button" type="button" data-sort="orders">Orders</button></th>
+                    <th><button class="sort-button" type="button" data-sort="buyers">Buyers</button></th>
+                    <th><button class="sort-button" type="button" data-sort="aov">AOV</button></th>
+                  </tr>
+                </thead>
+                <tbody id="productTable"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div class="tooltip" id="tooltip" role="tooltip"></div>
+    <script src="./data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
