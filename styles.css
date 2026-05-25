@@ -405,6 +405,10 @@ button {
   gap: 14px;
 }
 
+.diagnostic-grid {
+  margin-top: 14px;
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -465,6 +469,36 @@ button {
   font-weight: 800;
 }
 
+.empty-chart-label {
+  fill: var(--muted);
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.donut-total {
+  fill: var(--ink);
+  font-size: 24px;
+  font-weight: 850;
+}
+
+.bubble-rank {
+  fill: #fffaf4;
+  font-size: 13px;
+  font-weight: 900;
+  pointer-events: none;
+}
+
+.heatmap-label {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 850;
+  pointer-events: none;
+}
+
+.heatmap-label.light {
+  fill: #fffaf4;
+}
+
 .chart-hotspot {
   cursor: crosshair;
   transition: opacity 160ms ease, filter 160ms ease;
@@ -505,6 +539,12 @@ button {
   transform-origin: center;
 }
 
+.animated-slice {
+  animation: sliceIn 620ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 @keyframes fadeInUp {
   from {
     opacity: 0;
@@ -526,6 +566,17 @@ button {
   from {
     opacity: 0;
     transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes sliceIn {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
   }
   to {
     opacity: 1;

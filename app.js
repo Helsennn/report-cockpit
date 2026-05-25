@@ -27,6 +27,7 @@ const fmtShort = (value) =>
 const svgNS = "http://www.w3.org/2000/svg";
 const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const priceBandOrder = ["No CPI", "$0-5", "$5-10", "$10-20", "$20-35", "$35-60", "$60+"];
+const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const bandColors = {
   "No CPI": "#9c9389",
   "$0-5": "#f7c47a",
@@ -257,6 +258,46 @@ function groupWeeklyBuyerTypes(rows) {
       })),
     };
   });
+}
+
+function rowsForWeek(rows, label) {
+  return rows.filter((row) => row.week === label);
+}
+
+function aggregateProducts(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    if (!map.has(row.product)) {
+      map.set(row.product, { product: row.product, gmv: 0, orders: 0, buyers: new Set() });
+    }
+    const item = map.get(row.product);
+    item.gmv += row.price;
+    item.orders += 1;
+    if (row.buyer) item.buyers.add(row.buyer);
+  });
+
+  return [...map.values()].map((item) => ({
+    product: item.product,
+    gmv: item.gmv,
+    orders: item.orders,
+    buyers: item.buyers.size,
+    aov: item.orders ? item.gmv / item.orders : 0,
+  }));
+}
+
+function localWeekdayIndex(dateText) {
+  const [year, month, day] = String(dateText).split("-").map(Number);
+  const dayIndex = new Date(year, month - 1, day).getDay();
+  return dayIndex === 0 ? 6 : dayIndex - 1;
+}
+
+function describeActiveScope() {
+  return [
+    state.week === "all" ? "Rolling 4W" : state.week,
+    state.priceBand === "all" ? "all CPI" : `CPI ${state.priceBand}`,
+    state.buyerType === "all" ? "all buyers" : state.buyerType,
+    state.query ? `"${state.query}"` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 function groupedProducts(rows) {
@@ -1050,6 +1091,331 @@ function drawNewReturningAovFrequency(rows) {
   svg.append(rightLabel);
 }
 
+function drawEmptyChart(svg, message, x = 470, y = 190) {
+  const text = svgEl("text", { x, y, "text-anchor": "middle", class: "empty-chart-label" });
+  text.textContent = message;
+  svg.append(text);
+}
+
+function drawWaterfallChart(comparisonRows) {
+  const svg = chartScaffold("#waterfallChart", "0 0 940 390", "GMV waterfall from prior week to selected week");
+  const focus = focusWeekContext(comparisonRows);
+  const currentMetrics = aggregateRows(rowsForWeek(comparisonRows, focus.label));
+  const previousMetrics = focus.prevLabel ? aggregateRows(rowsForWeek(comparisonRows, focus.prevLabel)) : null;
+
+  if (!previousMetrics || !previousMetrics.orders) {
+    drawEmptyChart(svg, "No prior-week comparison under current filters.");
+    return;
+  }
+
+  const orderEffect = (currentMetrics.orders - previousMetrics.orders) * previousMetrics.aov;
+  const aovEffect = currentMetrics.gmv - previousMetrics.gmv - orderEffect;
+  const items = [
+    { label: focus.prevLabel, type: "total", start: 0, end: previousMetrics.gmv, value: previousMetrics.gmv },
+    { label: "Orders", type: "delta", value: orderEffect },
+    { label: "AOV / mix", type: "delta", value: aovEffect },
+    { label: focus.label, type: "total", start: 0, end: currentMetrics.gmv, value: currentMetrics.gmv },
+  ];
+
+  let running = previousMetrics.gmv;
+  items.forEach((item, index) => {
+    if (item.type === "delta") {
+      item.start = running;
+      item.end = running + item.value;
+      running = item.end;
+    }
+    item.index = index;
+  });
+
+  const allValues = items.flatMap((item) => [item.start, item.end]);
+  const minValue = Math.min(0, ...allValues) * 1.08;
+  const maxValue = Math.max(...allValues, 1) * 1.08;
+  const left = 92;
+  const top = 38;
+  const width = 760;
+  const height = 260;
+  const slot = width / items.length;
+  const barW = 112;
+  const yScale = (value) => top + ((maxValue - value) / (maxValue - minValue)) * height;
+
+  drawGrid(svg, left, top, width, height, 4, maxValue, fmtMoney);
+  const zeroY = yScale(0);
+  svg.append(svgEl("line", { x1: left, y1: zeroY, x2: left + width, y2: zeroY, stroke: "#d9c6b5", "stroke-width": 2 }));
+
+  items.forEach((item, index) => {
+    const x = left + slot * (index + 0.5) - barW / 2;
+    const y = yScale(Math.max(item.start, item.end));
+    const h = Math.max(Math.abs(yScale(item.start) - yScale(item.end)), 2);
+    const fill = item.type === "total" ? "#f97316" : item.value >= 0 ? "#5c8a4b" : "#dc5b42";
+    const rect = svgEl("rect", { x, y, width: barW, height: h, rx: 10, fill });
+    animateRect(rect);
+    attachTooltip(
+      rect,
+      `<strong>${escapeHtml(item.label)}</strong><br>${item.type === "total" ? "GMV" : "Impact"} ${fmtMoney(item.value)}<br>From ${fmtMoney(item.start)} to ${fmtMoney(item.end)}`,
+    );
+    svg.append(rect);
+
+    if (index < items.length - 1) {
+      const nextX = left + slot * (index + 1.5) - barW / 2;
+      const connectorY = yScale(item.end);
+      svg.append(svgEl("line", {
+        x1: x + barW + 8,
+        y1: connectorY,
+        x2: nextX - 8,
+        y2: connectorY,
+        stroke: "#cdb8a6",
+        "stroke-dasharray": "6 7",
+        "stroke-width": 2,
+      }));
+    }
+
+    const label = svgEl("text", { x: x + barW / 2, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
+    label.textContent = item.label;
+    svg.append(label);
+
+    const value = svgEl("text", { x: x + barW / 2, y: Math.max(y - 12, top + 16), "text-anchor": "middle", class: "axis-label" });
+    value.textContent = item.type === "delta" ? fmtMoney(item.value) : fmtShort(item.value);
+    svg.append(value);
+  });
+
+  const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
+  note.textContent = `${focus.label} vs ${focus.prevLabel}`;
+  svg.append(note);
+}
+
+function arcPath(cx, cy, outerR, innerR, startAngle, endAngle) {
+  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+  const outerStart = [cx + outerR * Math.cos(startAngle), cy + outerR * Math.sin(startAngle)];
+  const outerEnd = [cx + outerR * Math.cos(endAngle), cy + outerR * Math.sin(endAngle)];
+  const innerStart = [cx + innerR * Math.cos(endAngle), cy + innerR * Math.sin(endAngle)];
+  const innerEnd = [cx + innerR * Math.cos(startAngle), cy + innerR * Math.sin(startAngle)];
+  return [
+    `M ${outerStart[0]} ${outerStart[1]}`,
+    `A ${outerR} ${outerR} 0 ${largeArc} 1 ${outerEnd[0]} ${outerEnd[1]}`,
+    `L ${innerStart[0]} ${innerStart[1]}`,
+    `A ${innerR} ${innerR} 0 ${largeArc} 0 ${innerEnd[0]} ${innerEnd[1]}`,
+    "Z",
+  ].join(" ");
+}
+
+function drawCpiShareDonut(rows) {
+  const svg = chartScaffold("#cpiShareDonutChart", "0 0 940 390", "CPI band GMV share donut");
+  const bands = summarizePriceBandsFromRows(rows).filter((band) => band.gmv > 0);
+  const total = bands.reduce((sum, band) => sum + band.gmv, 0);
+  if (!total) {
+    drawEmptyChart(svg, "No GMV under current filters.");
+    return;
+  }
+
+  const cx = 300;
+  const cy = 190;
+  const outerR = 126;
+  const innerR = 72;
+  let cursor = -Math.PI / 2;
+
+  bands.forEach((band) => {
+    const slice = (band.gmv / total) * Math.PI * 2;
+    const path = svgEl("path", {
+      d: arcPath(cx, cy, outerR, innerR, cursor, cursor + slice - 0.006),
+      fill: bandColors[band.band],
+      class: "animated-slice",
+    });
+    attachTooltip(
+      path,
+      `<strong>CPI ${escapeHtml(band.band)}</strong><br>${((band.gmv / total) * 100).toFixed(1)}% of GMV<br>GMV ${fmtMoney(band.gmv)}<br>Orders ${fmtNum(band.orders)}<br>Buyers ${fmtNum(band.buyers)}`,
+    );
+    svg.append(path);
+    cursor += slice;
+  });
+
+  const center = svgEl("text", { x: cx, y: cy - 6, "text-anchor": "middle", class: "donut-total" });
+  center.textContent = fmtMoney(total);
+  svg.append(center);
+  const sub = svgEl("text", { x: cx, y: cy + 22, "text-anchor": "middle", class: "chart-title-note" });
+  sub.textContent = "filtered GMV";
+  svg.append(sub);
+
+  drawLegend(
+    svg,
+    bands.map((band) => ({ label: `${band.band} ${(band.gmv / total * 100).toFixed(0)}%`, color: bandColors[band.band], width: 126 })),
+    500,
+    96,
+    360,
+  );
+
+  const note = svgEl("text", { x: 842, y: 54, "text-anchor": "end", class: "chart-title-note" });
+  note.textContent = describeActiveScope();
+  svg.append(note);
+}
+
+function drawProductMomentum(comparisonRows) {
+  const svg = chartScaffold("#productMomentumChart", "0 0 940 430", "Product GMV momentum bubble chart");
+  const focus = focusWeekContext(comparisonRows);
+  if (!focus.prevLabel) {
+    drawEmptyChart(svg, "No prior week available for momentum comparison.", 470, 210);
+    return;
+  }
+
+  const current = new Map(aggregateProducts(rowsForWeek(comparisonRows, focus.label)).map((item) => [item.product, item]));
+  const previous = new Map(aggregateProducts(rowsForWeek(comparisonRows, focus.prevLabel)).map((item) => [item.product, item]));
+  const names = new Set([...current.keys(), ...previous.keys()]);
+  const products = [...names].map((product) => {
+    const cur = current.get(product) || { gmv: 0, orders: 0, buyers: 0, aov: 0 };
+    const prev = previous.get(product) || { gmv: 0, orders: 0, buyers: 0, aov: 0 };
+    return {
+      product,
+      currentGmv: cur.gmv,
+      previousGmv: prev.gmv,
+      delta: cur.gmv - prev.gmv,
+      wow: prev.gmv ? ((cur.gmv - prev.gmv) / prev.gmv) * 100 : null,
+      orders: cur.orders,
+      buyers: cur.buyers,
+      aov: cur.aov,
+    };
+  })
+    .filter((item) => item.currentGmv > 0 || item.previousGmv > 0)
+    .sort((a, b) => b.currentGmv - a.currentGmv)
+    .slice(0, 28);
+
+  if (!products.length) {
+    drawEmptyChart(svg, "No product rows under current filters.", 470, 210);
+    return;
+  }
+
+  const left = 92;
+  const top = 44;
+  const width = 760;
+  const height = 270;
+  const maxGmv = Math.max(...products.map((item) => item.currentGmv), 1);
+  const maxDelta = Math.max(...products.map((item) => Math.abs(item.delta)), 1);
+  const maxOrders = Math.max(...products.map((item) => item.orders), 1);
+  const xScale = (value) => left + (value / maxGmv) * width;
+  const yScale = (value) => top + height / 2 - (value / maxDelta) * (height / 2);
+
+  for (let i = 0; i <= 4; i++) {
+    const value = -maxDelta + (maxDelta * 2 * i) / 4;
+    const y = yScale(value);
+    svg.append(svgEl("line", { x1: left, y1: y, x2: left + width, y2: y, stroke: "#efe5dc" }));
+    const label = svgEl("text", { x: left - 8, y: y + 4, "text-anchor": "end", class: "tick" });
+    label.textContent = fmtMoney(value);
+    svg.append(label);
+  }
+  for (let i = 0; i <= 4; i++) {
+    const value = (maxGmv * i) / 4;
+    const x = xScale(value);
+    svg.append(svgEl("line", { x1: x, y1: top, x2: x, y2: top + height, stroke: "#f5ece2" }));
+    const label = svgEl("text", { x, y: top + height + 24, "text-anchor": "middle", class: "tick" });
+    label.textContent = fmtMoney(value);
+    svg.append(label);
+  }
+  const zeroY = yScale(0);
+  svg.append(svgEl("line", { x1: left, y1: zeroY, x2: left + width, y2: zeroY, stroke: "#d9c6b5", "stroke-width": 2 }));
+  const xLabel = svgEl("text", { x: left + width, y: top + height + 38, "text-anchor": "end", class: "chart-title-note" });
+  xLabel.textContent = `${focus.label} GMV`;
+  svg.append(xLabel);
+  const yLabel = svgEl("text", { x: left, y: top - 18, class: "chart-title-note" });
+  yLabel.textContent = `Vertical axis: GMV change vs ${focus.prevLabel}`;
+  svg.append(yLabel);
+
+  products.forEach((item, index) => {
+    const cx = xScale(item.currentGmv);
+    const cy = yScale(item.delta);
+    const r = 7 + Math.sqrt(item.orders / maxOrders) * 18;
+    const fill = item.delta >= 0 ? "#5c8a4b" : "#dc5b42";
+    const bubble = animatedDot({ cx, cy, r, fill, opacity: 0.78, stroke: "#fffaf4", "stroke-width": 2 });
+    attachTooltip(
+      bubble,
+      `<strong>${escapeHtml(item.product)}</strong><br>${escapeHtml(focus.label)} GMV ${fmtMoney(item.currentGmv)}<br>${escapeHtml(focus.prevLabel)} GMV ${fmtMoney(item.previousGmv)}<br>Change ${fmtMoney(item.delta)}${Number.isFinite(item.wow) ? ` (${fmtMaybePct(item.wow)})` : ""}<br>Orders ${fmtNum(item.orders)} · Buyers ${fmtNum(item.buyers)}<br>AOV ${fmtMoney(item.aov)}`,
+    );
+    svg.append(bubble);
+
+    if (index < 10 && r >= 13) {
+      const rank = svgEl("text", { x: cx, y: cy + 4, "text-anchor": "middle", class: "bubble-rank" });
+      rank.textContent = String(index + 1);
+      svg.append(rank);
+    }
+  });
+
+  drawLegend(svg, [
+    { label: "Positive change", color: "#5c8a4b", width: 148 },
+    { label: "Negative change", color: "#dc5b42", width: 150 },
+  ], left, 392, 760);
+}
+
+function drawWeekdayHeatmap(rows) {
+  const svg = chartScaffold("#weekdayHeatmapChart", "0 0 940 430", "Weekday GMV heatmap");
+  const weeks = state.week === "all" ? state.data.weekly.map((week) => week.week) : [state.week];
+  const map = new Map();
+  weeks.forEach((week) => {
+    map.set(week, weekdayLabels.map((day) => ({ week, day, gmv: 0, orders: 0, buyers: new Set() })));
+  });
+
+  rows.forEach((row) => {
+    const weekly = map.get(row.week);
+    if (!weekly) return;
+    const dayIndex = localWeekdayIndex(row.date);
+    const item = weekly[dayIndex];
+    item.gmv += row.price;
+    item.orders += 1;
+    if (row.buyer) item.buyers.add(row.buyer);
+  });
+
+  const cells = [...map.values()].flat().map((item) => ({ ...item, buyers: item.buyers.size }));
+  const max = Math.max(...cells.map((item) => item.gmv), 1);
+  const left = 112;
+  const top = 58;
+  const cellW = 92;
+  const cellH = weeks.length > 1 ? 52 : 74;
+  const gap = 8;
+
+  weekdayLabels.forEach((day, index) => {
+    const label = svgEl("text", { x: left + index * (cellW + gap) + cellW / 2, y: top - 20, "text-anchor": "middle", class: "axis-label" });
+    label.textContent = day;
+    svg.append(label);
+  });
+
+  weeks.forEach((week, rowIndex) => {
+    const y = top + rowIndex * (cellH + gap);
+    const weekLabel = svgEl("text", { x: left - 14, y: y + cellH / 2 + 5, "text-anchor": "end", class: "axis-label" });
+    weekLabel.textContent = week;
+    svg.append(weekLabel);
+    map.get(week).forEach((cell, dayIndex) => {
+      const intensity = cell.gmv / max;
+      const fill = `rgba(249, 115, 22, ${0.12 + intensity * 0.78})`;
+      const rect = svgEl("rect", {
+        x: left + dayIndex * (cellW + gap),
+        y,
+        width: cellW,
+        height: cellH,
+        rx: 10,
+        fill,
+        stroke: "#ead8c6",
+      });
+      animateRect(rect);
+      attachTooltip(
+        rect,
+        `<strong>${escapeHtml(week)} ${escapeHtml(cell.day)}</strong><br>GMV ${fmtMoney(cell.gmv)}<br>Orders ${fmtNum(cell.orders)}<br>Buyers ${fmtNum(cell.buyers)}`,
+      );
+      svg.append(rect);
+
+      if (cell.gmv > 0) {
+        const value = svgEl("text", {
+          x: left + dayIndex * (cellW + gap) + cellW / 2,
+          y: y + cellH / 2 + 5,
+          "text-anchor": "middle",
+          class: intensity > 0.62 ? "heatmap-label light" : "heatmap-label",
+        });
+        value.textContent = fmtShort(cell.gmv);
+        svg.append(value);
+      }
+    });
+  });
+
+  const note = svgEl("text", { x: 852, y: 392, "text-anchor": "end", class: "chart-title-note" });
+  note.textContent = describeActiveScope();
+  svg.append(note);
+}
+
 function renderNewReturningTable(rows) {
   const weekly = groupWeeklyBuyerTypes(rows);
   const rowsOut = weekly.flatMap((week) => week.types.map((type) => ({ week: week.week, ...type })));
@@ -1125,6 +1491,10 @@ function render() {
   drawNewReturningAovFrequency(buyerComparisonRows);
   drawBuyerRepeat(comparisonRows);
   drawConversion(comparisonRows);
+  drawWaterfallChart(comparisonRows);
+  drawCpiShareDonut(rows);
+  drawProductMomentum(comparisonRows);
+  drawWeekdayHeatmap(rows);
   renderNewReturningTable(buyerComparisonRows);
   renderTable(rows);
   requestAnimationFrame(replayChartAnimations);
