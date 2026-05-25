@@ -1353,7 +1353,7 @@ function drawWeekdayHeatmap(rows) {
   rows.forEach((row) => {
     const weekly = map.get(row.week);
     if (!weekly) return;
-    const dayIndex = localWeekdayIndex(row.date);
+    const dayIndex = localWeekdayIndex(row.broadcast_date || row.date);
     const item = weekly[dayIndex];
     item.gmv += row.price;
     item.orders += 1;
