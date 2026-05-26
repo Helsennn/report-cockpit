@@ -3,6 +3,7 @@ const state = {
   baseData: null,
   uploadedRows: [],
   uploadedReplaceDates: true,
+  kpiTiles: [],
   week: "all",
   priceBand: "all",
   buyerType: "all",
@@ -32,8 +33,11 @@ const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" })
 const priceBandOrder = ["No CPI", "$0-5", "$5-10", "$10-20", "$20-35", "$35-60", "$60+"];
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const uploadStorageKey = "homeDashboardCsvUploadV1";
+const kpiStorageKey = "homeDashboardKpiTilesV1";
 const broadcastDayCutoffHour = 3;
 const rollingWeekCount = 4;
+const maxKpiTiles = 10;
+const defaultKpiTiles = ["gmv", "orders", "buyers", "aov", "wow", "gmvPerHour"];
 const bandColors = {
   "No CPI": "#9c9389",
   "$0-5": "#f7c47a",
@@ -851,28 +855,135 @@ function focusWeekContext(comparisonRows) {
   };
 }
 
-function renderKpis(rows, comparisonRows) {
+function kpiCatalog(rows, comparisonRows) {
   const metrics = aggregateRows(rows);
   const focus = focusWeekContext(comparisonRows);
+  const buyerRows = getFilteredRows({ ignoreWeek: state.week === "all", ignoreBuyerType: true });
+  const typed = aggregateRowsByType(buyerRows);
+  const newType = typed.find((item) => item.buyerType === "new") || {};
+  const returningType = typed.find((item) => item.buyerType === "returning") || {};
+  const totalTypedGmv = typed.reduce((sum, item) => sum + item.gmv, 0);
+  const totalTypedBuyers = typed.reduce((sum, item) => sum + item.buyers, 0);
+  const weekText = state.week === "all" ? "Filtered rolling period" : state.week;
   const wowLabel = state.week === "all" ? "Latest WoW" : "Selected WoW";
-  const cards = [
-    ["GMV", fmtMoney(metrics.gmv), state.week === "all" ? "Filtered rolling period" : state.week],
-    ["Orders", fmtNum(metrics.orders), `${metrics.ordersPerBuyer.toFixed(2)} orders / buyer`],
-    ["Buyer Count", fmtNum(metrics.buyers), `${metrics.repeatRate.toFixed(1)}% repeat rate`],
-    ["AOV", fmtMoney(metrics.aov), "Average sold price"],
-    [wowLabel, fmtMaybePct(focus.wowPct), `${focus.label} vs ${focus.prevLabel || "prior week"}`, focus.wowPct < 0],
-    ["GMV/hr", fmtMoney(focus.gmvPerHour), `${focus.label} · ${focus.hours.toFixed(1)} stream hours`],
+
+  return [
+    { id: "gmv", label: "GMV", value: fmtMoney(metrics.gmv), sub: weekText },
+    { id: "orders", label: "Orders", value: fmtNum(metrics.orders), sub: `${metrics.ordersPerBuyer.toFixed(2)} orders / buyer` },
+    { id: "buyers", label: "Buyer Count", value: fmtNum(metrics.buyers), sub: `${metrics.repeatRate.toFixed(1)}% repeat rate` },
+    { id: "aov", label: "AOV", value: fmtMoney(metrics.aov), sub: "Average sold price" },
+    {
+      id: "wow",
+      label: wowLabel,
+      value: fmtMaybePct(focus.wowPct),
+      sub: `${focus.label} vs ${focus.prevLabel || "prior week"}`,
+      negative: focus.wowPct < 0,
+    },
+    { id: "gmvPerHour", label: "GMV/hr", value: fmtMoney(focus.gmvPerHour), sub: `${focus.label} · ${focus.hours.toFixed(1)} stream hours` },
+    { id: "streamHours", label: "Stream Hours", value: focus.hours.toFixed(1), sub: focus.label },
+    { id: "repeatRate", label: "Repeat Rate", value: `${metrics.repeatRate.toFixed(1)}%`, sub: `${fmtNum(metrics.buyers)} active buyers` },
+    { id: "ordersPerBuyer", label: "Frequency", value: metrics.ordersPerBuyer.toFixed(2), sub: "Orders per buyer" },
+    {
+      id: "newGmvPct",
+      label: "New GMV %",
+      value: `${(totalTypedGmv ? (newType.gmv || 0) / totalTypedGmv * 100 : 0).toFixed(1)}%`,
+      sub: `${fmtMoney(newType.gmv || 0)} new GMV`,
+    },
+    {
+      id: "returningGmvPct",
+      label: "Returning GMV %",
+      value: `${(totalTypedGmv ? (returningType.gmv || 0) / totalTypedGmv * 100 : 0).toFixed(1)}%`,
+      sub: `${fmtMoney(returningType.gmv || 0)} returning GMV`,
+    },
+    {
+      id: "newBuyers",
+      label: "New Buyers",
+      value: fmtNum(newType.buyers || 0),
+      sub: `${(totalTypedBuyers ? (newType.buyers || 0) / totalTypedBuyers * 100 : 0).toFixed(1)}% of buyers`,
+    },
+    {
+      id: "returningBuyers",
+      label: "Returning Buyers",
+      value: fmtNum(returningType.buyers || 0),
+      sub: `${(totalTypedBuyers ? (returningType.buyers || 0) / totalTypedBuyers * 100 : 0).toFixed(1)}% of buyers`,
+    },
+    { id: "newAov", label: "New AOV", value: fmtMoney(newType.aov || 0), sub: `${fmtNum(newType.orders || 0)} new orders` },
+    { id: "returningAov", label: "Returning AOV", value: fmtMoney(returningType.aov || 0), sub: `${fmtNum(returningType.orders || 0)} returning orders` },
+    { id: "newFrequency", label: "New Frequency", value: (newType.frequency || 0).toFixed(2), sub: "Orders per new buyer" },
+    { id: "returningFrequency", label: "Returning Frequency", value: (returningType.frequency || 0).toFixed(2), sub: "Orders per returning buyer" },
   ];
+}
+
+function saveKpiTiles() {
+  try {
+    localStorage.setItem(kpiStorageKey, JSON.stringify(state.kpiTiles));
+  } catch {
+    // The dashboard still works if browser storage is unavailable.
+  }
+}
+
+function loadKpiTiles() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(kpiStorageKey) || "null");
+    state.kpiTiles = Array.isArray(saved) && saved.length ? saved : [...defaultKpiTiles];
+  } catch {
+    state.kpiTiles = [...defaultKpiTiles];
+  }
+}
+
+function removeKpiTile(id) {
+  if (state.kpiTiles.length <= 1) return;
+  state.kpiTiles = state.kpiTiles.filter((tile) => tile !== id);
+  saveKpiTiles();
+  render();
+}
+
+function addKpiTile(id) {
+  if (!id || state.kpiTiles.includes(id) || state.kpiTiles.length >= maxKpiTiles) return;
+  state.kpiTiles = [...state.kpiTiles, id];
+  saveKpiTiles();
+  render();
+}
+
+function renderKpis(rows, comparisonRows) {
+  const catalog = kpiCatalog(rows, comparisonRows);
+  const catalogById = new Map(catalog.map((item) => [item.id, item]));
+  state.kpiTiles = state.kpiTiles.filter((id) => catalogById.has(id)).slice(0, maxKpiTiles);
+  if (!state.kpiTiles.length) state.kpiTiles = [...defaultKpiTiles];
+  const selectedCards = state.kpiTiles.map((id) => catalogById.get(id));
+  const remainingCards = catalog.filter((item) => !state.kpiTiles.includes(item.id));
+  const addTile = state.kpiTiles.length < maxKpiTiles && remainingCards.length
+    ? el("article", { class: "kpi kpi-add" }, [
+      el("span", {}, [document.createTextNode("Add metric")]),
+      el("select", { "aria-label": "Add KPI metric" }, [
+        el("option", { value: "" }, [document.createTextNode("Choose metric")]),
+        ...remainingCards.map((item) => el("option", { value: item.id }, [document.createTextNode(item.label)])),
+      ]),
+      el("em", {}, [document.createTextNode(`${maxKpiTiles - state.kpiTiles.length} slots available`)]),
+    ])
+    : null;
 
   document.querySelector("#kpiGrid").replaceChildren(
-    ...cards.map(([label, value, sub, negative]) =>
-      el("article", { class: "kpi" }, [
-        el("span", {}, [document.createTextNode(label)]),
-        el("strong", { class: negative ? "negative" : "" }, [document.createTextNode(value)]),
-        el("em", {}, [document.createTextNode(sub)]),
+    ...selectedCards.map((card) =>
+      el("article", { class: "kpi", "data-kpi": card.id }, [
+        el("div", { class: "kpi-head" }, [
+          el("span", {}, [document.createTextNode(card.label)]),
+          el("button", { type: "button", class: "kpi-remove", "data-kpi-remove": card.id, "aria-label": `Remove ${card.label}` }, [document.createTextNode("×")]),
+        ]),
+        el("strong", { class: card.negative ? "negative" : "" }, [document.createTextNode(card.value)]),
+        el("em", {}, [document.createTextNode(card.sub)]),
       ]),
     ),
+    ...(addTile ? [addTile] : []),
   );
+
+  document.querySelectorAll("[data-kpi-remove]").forEach((button) => {
+    button.addEventListener("click", () => removeKpiTile(button.dataset.kpiRemove));
+  });
+  const addSelect = document.querySelector(".kpi-add select");
+  if (addSelect) {
+    addSelect.addEventListener("change", (event) => addKpiTile(event.target.value));
+  }
 }
 
 function renderActiveFilters() {
@@ -1929,6 +2040,7 @@ async function init() {
     }
     state.data = cloneData(state.baseData);
     loadUploads();
+    loadKpiTiles();
     if (state.uploadedRows.length) state.data = rebuildDataWithUploads();
 
     document.querySelector("#sourceNote").textContent = state.data.source_note;
