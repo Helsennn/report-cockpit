@@ -194,6 +194,15 @@ input {
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 select:focus,
 input:focus,
 button:focus-visible {
@@ -214,6 +223,72 @@ button:hover {
 
 button:active {
   transform: scale(0.98);
+}
+
+.upload-panel {
+  margin-top: 8px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.upload-panel span {
+  color: var(--brown);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.upload-panel p {
+  margin: 4px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.upload-button,
+.upload-panel button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fffaf4;
+  color: var(--brown);
+  padding: 8px 12px;
+  font-size: 15px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.upload-button:hover,
+.upload-panel button:hover {
+  border-color: #e8bc98;
+  background: #fff5eb;
+}
+
+.upload-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.upload-check input {
+  width: 17px;
+  min-height: 17px;
+  accent-color: var(--orange);
+}
+
+.upload-status {
+  margin: 10px 0 0 !important;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .active-filters {

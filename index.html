@@ -52,6 +52,21 @@
           </section>
         </form>
 
+        <section class="upload-panel" aria-label="CSV upload">
+          <div>
+            <span>CSV Update</span>
+            <p>Upload order CSVs to refresh dates. Multiple sessions can be added in batches.</p>
+          </div>
+          <label class="upload-button" for="csvUpload">Choose CSV</label>
+          <input id="csvUpload" class="sr-only" type="file" accept=".csv,text/csv" multiple />
+          <label class="upload-check">
+            <input id="replaceDatesToggle" type="checkbox" checked />
+            Replace matching dates
+          </label>
+          <button id="clearUploads" type="button">Clear CSV</button>
+          <p id="uploadStatus" class="upload-status">No CSV override loaded.</p>
+        </section>
+
         <section class="active-filters" aria-label="Active filters">
           <span>Active view</span>
           <div id="activeFilters"></div>

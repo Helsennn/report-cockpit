@@ -1,5 +1,8 @@
 const state = {
   data: null,
+  baseData: null,
+  uploadedRows: [],
+  uploadedReplaceDates: true,
   week: "all",
   priceBand: "all",
   buyerType: "all",
@@ -28,6 +31,8 @@ const svgNS = "http://www.w3.org/2000/svg";
 const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 const priceBandOrder = ["No CPI", "$0-5", "$5-10", "$10-20", "$20-35", "$35-60", "$60+"];
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const uploadStorageKey = "homeDashboardCsvUploadV1";
+const broadcastDayCutoffHour = 3;
 const bandColors = {
   "No CPI": "#9c9389",
   "$0-5": "#f7c47a",
@@ -126,6 +131,416 @@ function attachTooltip(node, html) {
     showTooltip(html, box.left + box.width / 2, box.top);
   });
   node.addEventListener("blur", hideTooltip);
+}
+
+function cloneData(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
+function normalizeHeader(value) {
+  return String(value || "")
+    .replace(/^\uFEFF/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function readCsvField(row, names) {
+  for (const name of names) {
+    const value = row[normalizeHeader(name)];
+    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function parseNumber(value) {
+  const clean = String(value ?? "").replace(/[$,\s]/g, "");
+  const number = Number.parseFloat(clean);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function parseDateValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/);
+  if (iso) {
+    return new Date(
+      Number(iso[1]),
+      Number(iso[2]) - 1,
+      Number(iso[3]),
+      Number(iso[4] || 0),
+      Number(iso[5] || 0),
+      Number(iso[6] || 0),
+    );
+  }
+
+  const slash = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if (slash) {
+    let hour = Number(slash[4] || 0);
+    const meridiem = String(slash[7] || "").toUpperCase();
+    if (meridiem === "PM" && hour < 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    const year = Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3]);
+    return new Date(year, Number(slash[1]) - 1, Number(slash[2]), hour, Number(slash[5] || 0), Number(slash[6] || 0));
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date, days) {
+  const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function broadcastDate(date) {
+  return isoDate(date.getHours() < broadcastDayCutoffHour ? addDays(date, -1) : date);
+}
+
+function weekInfoForDate(dateText) {
+  const [year, month, day] = String(dateText).split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const jsDay = date.getDay();
+  const mondayOffset = jsDay === 0 ? -6 : 1 - jsDay;
+  const start = addDays(date, mondayOffset);
+  const end = addDays(start, 6);
+  const label = `${start.getMonth() + 1}.${start.getDate()}-${end.getMonth() + 1}.${end.getDate()}`;
+  return { label, start: isoDate(start), end: isoDate(end) };
+}
+
+function priceBandFromTarget(targetPrice) {
+  if (!targetPrice || targetPrice <= 0) return "No CPI";
+  if (targetPrice < 5) return "$0-5";
+  if (targetPrice < 10) return "$5-10";
+  if (targetPrice < 20) return "$10-20";
+  if (targetPrice < 35) return "$20-35";
+  if (targetPrice < 60) return "$35-60";
+  return "$60+";
+}
+
+function cleanProductName(value) {
+  let name = String(value || "").replace(/\s+/g, " ").trim();
+  if (name.includes("#")) name = name.replace(/\s+#\d+\s*$/, "").trim();
+  return name.slice(0, 140);
+}
+
+function activeCsvStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  return !["failed", "cancelled", "canceled"].includes(status);
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (char !== "\r") {
+      field += char;
+    }
+  }
+
+  if (field || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows.filter((item) => item.some((cell) => String(cell).trim()));
+}
+
+function csvToObjects(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(normalizeHeader);
+  return rows.slice(1).map((cells) => {
+    const row = {};
+    headers.forEach((header, index) => {
+      if (header) row[header] = cells[index] ?? "";
+    });
+    return row;
+  });
+}
+
+function normalizeCsvOrder(row, sourceFile) {
+  if (!activeCsvStatus(readCsvField(row, ["cancelled_or_failed", "status", "order_status"]))) return null;
+  const placedAt = parseDateValue(readCsvField(row, ["placed_at", "sold_at", "created_at", "order_date", "date", "timestamp"]));
+  if (!placedAt) return null;
+
+  const price = parseNumber(readCsvField(row, ["original_item_price", "sold_price", "price", "item_price", "amount", "gmv"]));
+  if (price <= 0) return null;
+
+  const targetPrice = parseNumber(readCsvField(row, ["cost_per_item", "target_price", "cpi", "cost", "cogs"]));
+  const broadcast = broadcastDate(placedAt);
+  const week = weekInfoForDate(broadcast);
+  const product = cleanProductName(readCsvField(row, ["product_name", "item_name", "product", "title", "item"]));
+  if (!product) return null;
+
+  return {
+    order_id: readCsvField(row, ["order_id", "orderid", "id"]),
+    week: week.label,
+    week_start: week.start,
+    week_end: week.end,
+    date: isoDate(placedAt),
+    broadcast_date: broadcast,
+    placed_at: placedAt.toISOString(),
+    buyer: readCsvField(row, ["buyer_username", "buyer", "username", "customer", "buyer_name"]),
+    product,
+    price,
+    target_price: targetPrice,
+    price_band: priceBandFromTarget(targetPrice),
+    buyer_type: "new",
+    source: "csv_upload",
+    source_file: sourceFile,
+  };
+}
+
+function estimateStreamHoursFromRows(rows) {
+  const timestamps = rows
+    .map((row) => parseDateValue(row.placed_at || row.date))
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+  if (!timestamps.length) return 0;
+
+  const sessions = [];
+  let start = timestamps[0];
+  let previous = timestamps[0];
+  timestamps.slice(1).forEach((time) => {
+    if (time - previous > 90 * 60 * 1000) {
+      sessions.push([start, previous]);
+      start = time;
+    }
+    previous = time;
+  });
+  sessions.push([start, previous]);
+
+  return sessions.reduce((sum, [sessionStart, sessionEnd]) => {
+    return sum + Math.max((sessionEnd - sessionStart) / 3600000, 0.5);
+  }, 0);
+}
+
+function buildWeeks(baseData, records) {
+  const weeks = new Map((baseData.weeks || []).map((week) => [week.label, { ...week }]));
+  records.forEach((row) => {
+    if (!weeks.has(row.week)) {
+      const info = row.week_start && row.week_end
+        ? { label: row.week, start: row.week_start, end: row.week_end }
+        : weekInfoForDate(row.broadcast_date || row.date);
+      weeks.set(info.label, info);
+    }
+  });
+  return [...weeks.values()].sort((a, b) => a.start.localeCompare(b.start));
+}
+
+function applyBuyerTypes(records, weeks) {
+  const weekStarts = new Map(weeks.map((week) => [week.label, week.start]));
+  const basePriorBuyers = new Set(
+    (state.baseData?.records || [])
+      .filter((row) => row.buyer_type === "returning")
+      .map((row) => row.buyer)
+      .filter(Boolean),
+  );
+  const buyersByEarlierWeek = new Map();
+  weeks.forEach((week) => {
+    buyersByEarlierWeek.set(week.label, new Set(basePriorBuyers));
+    records.forEach((row) => {
+      const rowStart = weekStarts.get(row.week);
+      if (row.buyer && rowStart && rowStart < week.start) buyersByEarlierWeek.get(week.label).add(row.buyer);
+    });
+  });
+
+  records.forEach((row) => {
+    if (row.source !== "csv_upload") return;
+    const prior = buyersByEarlierWeek.get(row.week);
+    row.buyer_type = prior?.has(row.buyer) ? "returning" : "new";
+  });
+}
+
+function rebuildDataWithUploads() {
+  const baseData = cloneData(state.baseData);
+  const uploadedWeeks = new Set(state.uploadedRows.map((row) => row.week));
+  const uploadedDates = new Set(state.uploadedRows.map((row) => row.broadcast_date || row.date));
+  const baseRecords = state.uploadedReplaceDates
+    ? baseData.records.filter((row) => !uploadedDates.has(row.broadcast_date || row.date))
+    : baseData.records.slice();
+  const records = [...baseRecords, ...state.uploadedRows.map((row) => ({ ...row }))];
+  const weeks = buildWeeks(baseData, records);
+  applyBuyerTypes(records, weeks);
+
+  const oldWeekly = new Map((baseData.weekly || []).map((week) => [week.week, week]));
+  const weekly = weeks.map((week) => {
+    const wr = records.filter((row) => row.week === week.label);
+    const metrics = aggregateRows(wr);
+    const typed = aggregateRowsByType(wr);
+    const newType = typed.find((item) => item.buyerType === "new");
+    const returningType = typed.find((item) => item.buyerType === "returning");
+    const uploadedInWeek = wr.some((row) => row.source === "csv_upload");
+    const streamHours = uploadedInWeek ? estimateStreamHoursFromRows(wr) : (oldWeekly.get(week.label)?.stream_hours || 0);
+
+    return {
+      week: week.label,
+      gmv: Number(metrics.gmv.toFixed(2)),
+      orders: metrics.orders,
+      buyers: metrics.buyers,
+      aov: Number(metrics.aov.toFixed(2)),
+      orders_per_buyer: Number(metrics.ordersPerBuyer.toFixed(2)),
+      repeat_buyers: Math.round((metrics.repeatRate / 100) * metrics.buyers),
+      repeat_rate: Number(metrics.repeatRate.toFixed(2)),
+      new_buyers: newType?.buyers || 0,
+      returning_buyers: returningType?.buyers || 0,
+      new_buyer_pct: metrics.buyers ? Number((((newType?.buyers || 0) / metrics.buyers) * 100).toFixed(2)) : 0,
+      returning_buyer_pct: metrics.buyers ? Number((((returningType?.buyers || 0) / metrics.buyers) * 100).toFixed(2)) : 0,
+      new_gmv: Number((newType?.gmv || 0).toFixed(2)),
+      returning_gmv: Number((returningType?.gmv || 0).toFixed(2)),
+      new_gmv_pct: metrics.gmv ? Number((((newType?.gmv || 0) / metrics.gmv) * 100).toFixed(2)) : 0,
+      returning_gmv_pct: metrics.gmv ? Number((((returningType?.gmv || 0) / metrics.gmv) * 100).toFixed(2)) : 0,
+      stream_hours: Number(streamHours.toFixed(2)),
+      gmv_per_hour: streamHours ? Number((metrics.gmv / streamHours).toFixed(2)) : 0,
+    };
+  });
+
+  weekly.forEach((week, index) => {
+    const previous = weekly[index - 1];
+    if (previous?.gmv) week.wow_gmv_pct = Number((((week.gmv - previous.gmv) / previous.gmv) * 100).toFixed(2));
+    else week.wow_gmv_pct = oldWeekly.get(week.week)?.wow_gmv_pct ?? null;
+  });
+
+  const latestWeek = weekly.at(-1)?.week || baseData.latest_week;
+  const latestRows = records.filter((row) => row.week === latestWeek);
+  const daily = [...new Set(latestRows.map((row) => row.broadcast_date || row.date))]
+    .sort()
+    .map((date) => {
+      const rows = latestRows.filter((row) => (row.broadcast_date || row.date) === date);
+      const metrics = aggregateRows(rows);
+      return { date, gmv: Number(metrics.gmv.toFixed(2)), orders: metrics.orders, buyers: metrics.buyers };
+    });
+
+  return {
+    ...baseData,
+    generated_at: new Date().toLocaleString(),
+    source_note: `${baseData.source_note} CSV upload override is active: ${state.uploadedRows.length.toLocaleString()} rows across ${uploadedWeeks.size} week(s) and ${uploadedDates.size} date(s); ${state.uploadedReplaceDates ? "matching dates replaced" : "rows appended"}.`,
+    weeks,
+    weekly,
+    latest_week: latestWeek,
+    latest_daily: daily,
+    price_bands_latest: summarizePriceBandsFromRows(latestRows),
+    price_bands_all: summarizePriceBandsFromRows(records),
+    top_products_latest: aggregateProducts(latestRows).sort((a, b) => b.gmv - a.gmv).slice(0, 30),
+    top_products_4w: aggregateProducts(records).sort((a, b) => b.gmv - a.gmv).slice(0, 30),
+    records,
+  };
+}
+
+function refreshDataAfterUpload() {
+  state.data = state.uploadedRows.length ? rebuildDataWithUploads() : cloneData(state.baseData);
+  document.querySelector("#sourceNote").textContent = state.data.source_note;
+  document.querySelector("#generatedAt").textContent = `Updated ${state.data.generated_at}`;
+  setOptions();
+  if (state.week !== "all" && !state.data.weeks.some((week) => week.label === state.week)) state.week = "all";
+  if (state.priceBand !== "all" && !state.data.records.some((row) => row.price_band === state.priceBand)) state.priceBand = "all";
+  document.querySelector("#weekFilter").value = state.week;
+  document.querySelector("#priceBandFilter").value = state.priceBand;
+  render();
+}
+
+function updateUploadStatus(message) {
+  const node = document.querySelector("#uploadStatus");
+  if (node) node.textContent = message;
+}
+
+function saveUploads() {
+  try {
+    if (!state.uploadedRows.length) {
+      localStorage.removeItem(uploadStorageKey);
+      return;
+    }
+      localStorage.setItem(uploadStorageKey, JSON.stringify({
+      replaceDates: state.uploadedReplaceDates,
+      rows: state.uploadedRows,
+    }));
+  } catch {
+    updateUploadStatus("CSV loaded, but browser storage is full. It will reset after refresh.");
+  }
+}
+
+function loadUploads() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(uploadStorageKey) || "null");
+    if (!saved?.rows?.length) return;
+    state.uploadedRows = saved.rows;
+    state.uploadedReplaceDates = saved.replaceDates ?? saved.replaceWeeks ?? true;
+    document.querySelector("#replaceDatesToggle").checked = state.uploadedReplaceDates;
+    updateUploadStatus(`${state.uploadedRows.length.toLocaleString()} uploaded rows restored from this browser.`);
+  } catch {
+    localStorage.removeItem(uploadStorageKey);
+  }
+}
+
+function dedupeUploadedRows(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = row.order_id
+      ? `id:${row.order_id}`
+      : `row:${row.date}|${row.buyer}|${row.product}|${row.price}`;
+    map.set(key, row);
+  });
+  return [...map.values()];
+}
+
+async function handleCsvUpload(files) {
+  const parsedRows = [];
+  for (const file of files) {
+    const text = await file.text();
+    csvToObjects(text).forEach((row) => {
+      const normalized = normalizeCsvOrder(row, file.name);
+      if (normalized) parsedRows.push(normalized);
+    });
+  }
+
+  if (!parsedRows.length) {
+    updateUploadStatus("No valid paid order rows found in that CSV.");
+    return;
+  }
+
+  const beforeCount = state.uploadedRows.length;
+  state.uploadedRows = dedupeUploadedRows([...state.uploadedRows, ...parsedRows]);
+  state.uploadedReplaceDates = document.querySelector("#replaceDatesToggle").checked;
+  saveUploads();
+  const weeks = new Set(state.uploadedRows.map((row) => row.week));
+  const dates = new Set(state.uploadedRows.map((row) => row.broadcast_date || row.date));
+  const added = state.uploadedRows.length - beforeCount;
+  const replaced = parsedRows.length - added;
+  updateUploadStatus(`${state.uploadedRows.length.toLocaleString()} uploaded rows active across ${weeks.size} week(s), ${dates.size} date(s).${replaced > 0 ? ` ${replaced.toLocaleString()} duplicate/corrected rows merged.` : ""}`);
+  refreshDataAfterUpload();
 }
 
 function getFilteredRows(options = {}) {
@@ -1503,12 +1918,15 @@ function render() {
 async function init() {
   try {
     if (window.DASHBOARD_DATA) {
-      state.data = window.DASHBOARD_DATA;
+      state.baseData = cloneData(window.DASHBOARD_DATA);
     } else {
       const response = await fetch("./home_dashboard_data.json");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      state.data = await response.json();
+      state.baseData = await response.json();
     }
+    state.data = cloneData(state.baseData);
+    loadUploads();
+    if (state.uploadedRows.length) state.data = rebuildDataWithUploads();
 
     document.querySelector("#sourceNote").textContent = state.data.source_note;
     document.querySelector("#generatedAt").textContent = `Updated ${state.data.generated_at}`;
@@ -1530,6 +1948,24 @@ async function init() {
       state.query = event.target.value.trim().toLowerCase();
       render();
     }));
+    document.querySelector("#csvUpload").addEventListener("change", (event) => {
+      handleCsvUpload([...event.target.files]).catch((error) => updateUploadStatus(error.message));
+      event.target.value = "";
+    });
+    document.querySelector("#replaceDatesToggle").addEventListener("change", (event) => {
+      state.uploadedReplaceDates = event.target.checked;
+      if (state.uploadedRows.length) {
+        saveUploads();
+        refreshDataAfterUpload();
+        updateUploadStatus(`${state.uploadedRows.length.toLocaleString()} uploaded rows re-applied.`);
+      }
+    });
+    document.querySelector("#clearUploads").addEventListener("click", () => {
+      state.uploadedRows = [];
+      saveUploads();
+      updateUploadStatus("CSV override cleared. Showing generated SQL/Drive data.");
+      refreshDataAfterUpload();
+    });
     document.querySelector("#resetFilters").addEventListener("click", () => {
       state.week = "all";
       state.priceBand = "all";
