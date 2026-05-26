@@ -33,6 +33,7 @@ const priceBandOrder = ["No CPI", "$0-5", "$5-10", "$10-20", "$20-35", "$35-60",
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const uploadStorageKey = "homeDashboardCsvUploadV1";
 const broadcastDayCutoffHour = 3;
+const rollingWeekCount = 4;
 const bandColors = {
   "No CPI": "#9c9389",
   "$0-5": "#f7c47a",
@@ -392,8 +393,10 @@ function rebuildDataWithUploads() {
   const baseRecords = state.uploadedReplaceDates
     ? baseData.records.filter((row) => !uploadedDates.has(row.broadcast_date || row.date))
     : baseData.records.slice();
-  const records = [...baseRecords, ...state.uploadedRows.map((row) => ({ ...row }))];
-  const weeks = buildWeeks(baseData, records);
+  const allRecords = [...baseRecords, ...state.uploadedRows.map((row) => ({ ...row }))];
+  const weeks = buildWeeks(baseData, allRecords).slice(-rollingWeekCount);
+  const visibleWeeks = new Set(weeks.map((week) => week.label));
+  const records = allRecords.filter((row) => visibleWeeks.has(row.week));
   applyBuyerTypes(records, weeks);
 
   const oldWeekly = new Map((baseData.weekly || []).map((week) => [week.week, week]));
