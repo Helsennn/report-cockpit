@@ -4,6 +4,7 @@ const state = {
   uploadedRows: [],
   uploadedReplaceDates: true,
   kpiTiles: [],
+  pins: [],
   week: "all",
   priceBand: "all",
   buyerType: "all",
@@ -34,10 +35,30 @@ const priceBandOrder = ["No CPI", "$0-5", "$5-10", "$10-20", "$20-35", "$35-60",
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const uploadStorageKey = "homeDashboardCsvUploadV1";
 const kpiStorageKey = "homeDashboardKpiTilesV1";
+const pinsStorageKey = "homeDashboardPinsV1";
 const broadcastDayCutoffHour = 3;
 const rollingWeekCount = 4;
 const maxKpiTiles = 10;
 const defaultKpiTiles = ["gmv", "orders", "buyers", "aov", "wow", "gmvPerHour"];
+const kpiPanelTargets = {
+  gmv: "#weeklyGmvChart",
+  orders: "#weeklyGmvChart",
+  wow: "#weeklyGmvChart",
+  buyers: "#buyerRepeatChart",
+  repeatRate: "#buyerRepeatChart",
+  ordersPerBuyer: "#newReturningAovFreqChart",
+  aov: "#newReturningAovFreqChart",
+  newAov: "#newReturningAovFreqChart",
+  returningAov: "#newReturningAovFreqChart",
+  newFrequency: "#newReturningAovFreqChart",
+  returningFrequency: "#newReturningAovFreqChart",
+  gmvPerHour: "#conversionChart",
+  streamHours: "#conversionChart",
+  newGmvPct: "#newReturningChart",
+  returningGmvPct: "#newReturningChart",
+  newBuyers: "#newReturningChart",
+  returningBuyers: "#newReturningChart",
+};
 const bandColors = {
   "No CPI": "#9c9389",
   "$0-5": "#f7c47a",
@@ -138,6 +159,21 @@ function attachTooltip(node, html) {
   node.addEventListener("blur", hideTooltip);
 }
 
+function attachChartAction(node, label, handler) {
+  node.classList.add("chart-action");
+  node.setAttribute("role", "button");
+  node.setAttribute("aria-label", `${label}. Press Enter for drill-down.`);
+  node.addEventListener("click", (event) => {
+    event.stopPropagation();
+    handler(event);
+  });
+  node.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    handler(event);
+  });
+}
+
 function attachHtmlTooltip(node, html) {
   node.addEventListener("mouseenter", (event) => showTooltip(html, event.clientX, event.clientY));
   node.addEventListener("mousemove", (event) => showTooltip(html, event.clientX, event.clientY));
@@ -147,6 +183,183 @@ function attachHtmlTooltip(node, html) {
     showTooltip(html, box.left + box.width / 2, box.top);
   });
   node.addEventListener("blur", hideTooltip);
+}
+
+function rowsForCriteria(criteria = {}) {
+  return state.data.records.filter((row) => {
+    if (criteria.week ? row.week !== criteria.week : state.week !== "all" && row.week !== state.week) return false;
+    if (criteria.priceBand ? row.price_band !== criteria.priceBand : state.priceBand !== "all" && row.price_band !== state.priceBand) return false;
+    if (criteria.buyerType ? row.buyer_type !== criteria.buyerType : state.buyerType !== "all" && row.buyer_type !== state.buyerType) return false;
+    if (criteria.product && row.product !== criteria.product) return false;
+    if (criteria.date && (row.broadcast_date || row.date) !== criteria.date) return false;
+    if (!criteria.product && state.query && !row.product.toLowerCase().includes(state.query)) return false;
+    return true;
+  });
+}
+
+function syncFilterControls() {
+  document.querySelector("#weekFilter").value = state.week;
+  document.querySelector("#priceBandFilter").value = state.priceBand;
+  document.querySelector("#buyerTypeFilter").value = state.buyerType;
+  document.querySelector("#productSearch").value = state.query;
+}
+
+function applyChartFilters(criteria = {}) {
+  if (criteria.week) state.week = criteria.week;
+  if (criteria.priceBand) state.priceBand = criteria.priceBand;
+  if (criteria.buyerType) state.buyerType = criteria.buyerType;
+  if (criteria.product) state.query = criteria.product.toLowerCase();
+  syncFilterControls();
+}
+
+function metricCards(rows) {
+  const metrics = aggregateRows(rows);
+  return [
+    ["GMV", fmtMoney(metrics.gmv)],
+    ["Orders", fmtNum(metrics.orders)],
+    ["Buyers", fmtNum(metrics.buyers)],
+    ["AOV", fmtMoney(metrics.aov)],
+    ["Frequency", metrics.ordersPerBuyer.toFixed(2)],
+    ["Repeat", `${metrics.repeatRate.toFixed(1)}%`],
+  ];
+}
+
+function topProductsRows(rows, limit = 8) {
+  return aggregateProducts(rows)
+    .sort((a, b) => b.gmv - a.gmv || b.orders - a.orders)
+    .slice(0, limit);
+}
+
+function pinKey(pin) {
+  return `${pin.type}:${pin.value}`;
+}
+
+function savePins() {
+  try {
+    localStorage.setItem(pinsStorageKey, JSON.stringify(state.pins));
+  } catch {
+    // Pins are optional convenience state.
+  }
+}
+
+function loadPins() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(pinsStorageKey) || "[]");
+    state.pins = Array.isArray(saved) ? saved : [];
+  } catch {
+    state.pins = [];
+  }
+}
+
+function addPin(pin) {
+  if (!pin?.value) return;
+  const key = pinKey(pin);
+  if (!state.pins.some((item) => pinKey(item) === key)) {
+    state.pins = [...state.pins, pin].slice(-6);
+    savePins();
+  }
+  renderPins();
+}
+
+function removePin(key) {
+  state.pins = state.pins.filter((pin) => pinKey(pin) !== key);
+  savePins();
+  renderPins();
+}
+
+function renderPins() {
+  const host = document.querySelector("#pinList");
+  if (!host) return;
+  if (!state.pins.length) {
+    host.replaceChildren(el("p", { class: "pin-empty" }, [document.createTextNode("Click a product bubble or CPI segment to pin.")]));
+    return;
+  }
+
+  host.replaceChildren(
+    ...state.pins.map((pin) => {
+      const rows = rowsForCriteria(pin.type === "product" ? { product: pin.value } : { priceBand: pin.value });
+      const metrics = aggregateRows(rows);
+      return el("button", { type: "button", class: "pin-chip", "data-pin-key": pinKey(pin) }, [
+        el("span", {}, [document.createTextNode(pin.label)]),
+        el("strong", {}, [document.createTextNode(fmtMoney(metrics.gmv))]),
+      ]);
+    }),
+  );
+
+  host.querySelectorAll(".pin-chip").forEach((button) => {
+    button.addEventListener("click", () => {
+      const pin = state.pins.find((item) => pinKey(item) === button.dataset.pinKey);
+      if (!pin) return;
+      if (pin.type === "product") state.query = pin.value.toLowerCase();
+      if (pin.type === "priceBand") state.priceBand = pin.value;
+      syncFilterControls();
+      render();
+    });
+  });
+}
+
+function openDrilldown({ title, kicker = "Drill-down", rows, criteria = {}, pin = null }) {
+  const panel = document.querySelector("#drilldownPanel");
+  const scrim = document.querySelector("#drawerScrim");
+  const body = document.querySelector("#drilldownBody");
+  if (!panel || !body) return;
+
+  const metrics = metricCards(rows);
+  const products = topProductsRows(rows, 10);
+  body.replaceChildren(
+    el("section", { class: "drill-metrics" }, metrics.map(([label, value]) =>
+      el("div", {}, [
+        el("span", {}, [document.createTextNode(label)]),
+        el("strong", {}, [document.createTextNode(value)]),
+      ]),
+    )),
+    el("div", { class: "drill-actions" }, [
+      el("button", { type: "button", id: "applyDrillFilter" }, [document.createTextNode("Apply filter")]),
+      ...(pin ? [el("button", { type: "button", id: "pinSelection" }, [document.createTextNode("Pin compare")])] : []),
+    ]),
+    el("h3", {}, [document.createTextNode("Top products")]),
+    el("div", { class: "drill-table" }, [
+      el("table", {}, [
+        el("thead", {}, [el("tr", {}, ["Product", "GMV", "Orders", "Buyers"].map((text) => el("th", {}, [document.createTextNode(text)])))]),
+        el("tbody", {}, products.length ? products.map((product) =>
+          el("tr", {}, [
+            el("td", {}, [document.createTextNode(product.product)]),
+            el("td", {}, [document.createTextNode(fmtMoney(product.gmv))]),
+            el("td", {}, [document.createTextNode(fmtNum(product.orders))]),
+            el("td", {}, [document.createTextNode(fmtNum(product.buyers))]),
+          ]),
+        ) : [el("tr", {}, [el("td", { colspan: "4" }, [document.createTextNode("No product rows in this selection.")])])]),
+      ]),
+    ]),
+  );
+
+  document.querySelector("#drilldownKicker").textContent = kicker;
+  document.querySelector("#drilldownTitle").textContent = title;
+  panel.classList.add("is-open");
+  scrim?.classList.add("is-visible");
+  panel.setAttribute("aria-hidden", "false");
+  document.querySelector("#applyDrillFilter")?.addEventListener("click", () => {
+    applyChartFilters(criteria);
+    closeDrilldown();
+    render();
+  });
+  document.querySelector("#pinSelection")?.addEventListener("click", () => addPin(pin));
+}
+
+function openCriteriaDrilldown({ title, kicker, criteria, pin = null }) {
+  openDrilldown({
+    title,
+    kicker,
+    criteria,
+    pin,
+    rows: rowsForCriteria(criteria),
+  });
+}
+
+function closeDrilldown() {
+  document.querySelector("#drilldownPanel")?.classList.remove("is-open");
+  document.querySelector("#drawerScrim")?.classList.remove("is-visible");
+  document.querySelector("#drilldownPanel")?.setAttribute("aria-hidden", "true");
 }
 
 function cloneData(data) {
@@ -483,6 +696,7 @@ function refreshDataAfterUpload() {
   document.querySelector("#sourceNote").textContent = state.data.source_note;
   document.querySelector("#generatedAt").textContent = `Updated ${state.data.generated_at}`;
   setOptions();
+  renderProductSuggestions();
   if (state.week !== "all" && !state.data.weeks.some((week) => week.label === state.week)) state.week = "all";
   if (state.priceBand !== "all" && !state.data.records.some((row) => row.price_band === state.priceBand)) state.priceBand = "all";
   document.querySelector("#weekFilter").value = state.week;
@@ -813,6 +1027,7 @@ function weeklyStatsFromRows(rows) {
       aov: metrics.aov,
       orders_per_buyer: metrics.ordersPerBuyer,
       repeat_rate: metrics.repeatRate,
+      gmv_per_hour: meta.stream_hours ? metrics.gmv / meta.stream_hours : 0,
     };
   });
 
@@ -998,6 +1213,16 @@ function renderKpis(rows, comparisonRows) {
   });
   document.querySelectorAll("[data-kpi-tooltip]").forEach((card) => {
     attachHtmlTooltip(card, escapeHtml(card.dataset.kpiTooltip));
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("button, select")) return;
+      highlightPanel(kpiPanelTargets[card.dataset.kpi] || "#weeklyGmvChart");
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      if (event.target.closest("button, select")) return;
+      event.preventDefault();
+      highlightPanel(kpiPanelTargets[card.dataset.kpi] || "#weeklyGmvChart");
+    });
   });
   const addSelect = document.querySelector(".kpi-add select");
   if (addSelect) {
@@ -1068,6 +1293,57 @@ function renderInsights(rows, comparisonRows) {
       ]),
     ),
   );
+}
+
+function renderAlerts(comparisonRows) {
+  const host = document.querySelector("#alertRail");
+  if (!host) return;
+  const weekly = weeklyStatsFromRows(comparisonRows);
+  const alerts = [];
+  weekly.forEach((week) => {
+    if (Number.isFinite(week.wow_gmv_pct) && Math.abs(week.wow_gmv_pct) >= 20) {
+      alerts.push({
+        tone: week.wow_gmv_pct < 0 ? "negative" : "positive",
+        label: `${week.week} GMV ${fmtMaybePct(week.wow_gmv_pct)} WoW`,
+        criteria: { week: week.week },
+      });
+    }
+    if (week.gmv_per_hour && week.gmv_per_hour < 900) {
+      alerts.push({
+        tone: "warm",
+        label: `${week.week} GMV/hr ${fmtMoney(week.gmv_per_hour)}`,
+        criteria: { week: week.week },
+      });
+    }
+  });
+
+  host.replaceChildren(
+    ...alerts.slice(-4).map((alert) => el("button", { type: "button", class: `alert-chip ${alert.tone}` }, [document.createTextNode(alert.label)])),
+  );
+  [...host.querySelectorAll(".alert-chip")].forEach((button, index) => {
+    const alert = alerts.slice(-4)[index];
+    button.addEventListener("click", () => {
+      const rows = rowsForCriteria(alert.criteria);
+      openDrilldown({ title: alert.label, kicker: "Anomaly", rows, criteria: alert.criteria });
+    });
+  });
+}
+
+function renderProductSuggestions() {
+  const list = document.querySelector("#productSuggestions");
+  if (!list) return;
+  const products = aggregateProducts(state.data.records)
+    .sort((a, b) => b.gmv - a.gmv)
+    .slice(0, 80);
+  list.replaceChildren(...products.map((product) => el("option", { value: product.product })));
+}
+
+function highlightPanel(selector) {
+  const panel = document.querySelector(selector)?.closest(".panel") || document.querySelector(selector);
+  if (!panel) return;
+  panel.scrollIntoView({ behavior: "smooth", block: "center" });
+  panel.classList.add("panel-highlight");
+  window.setTimeout(() => panel.classList.remove("panel-highlight"), 1300);
 }
 
 function addDefs(svg) {
@@ -1264,6 +1540,9 @@ function drawWeeklyGmv(rows) {
     const rect = svgEl("rect", { x: x - barW / 2, y, width: barW, height: h, rx: 12, fill: "url(#barGrad)" });
     animateRect(rect);
     attachTooltip(rect, `<strong>${escapeHtml(d.week)}</strong><br>GMV ${fmtMoney(d.gmv)}<br>WoW ${fmtMaybePct(d.wow_gmv_pct)}`);
+    attachChartAction(rect, `${d.week} weekly GMV`, () => {
+      openCriteriaDrilldown({ title: `${d.week} Weekly GMV`, kicker: "Week", criteria: { week: d.week } });
+    });
     svg.append(rect);
 
     const label = svgEl("text", { x, y: top + height + 28, "text-anchor": "middle", class: "axis-label" });
@@ -1293,6 +1572,9 @@ function drawWeeklyGmv(rows) {
   points.forEach(([x, y, d]) => {
     const dot = animatedDot({ cx: x, cy: y, r: 7, fill: "#dc5b42", stroke: "#fffaf4", "stroke-width": 3 });
     attachTooltip(dot, `<strong>${escapeHtml(d.week)} WoW</strong><br>${fmtMaybePct(d.wow_gmv_pct)}<br>GMV ${fmtMoney(d.gmv)}`);
+    attachChartAction(dot, `${d.week} WoW trend`, () => {
+      openCriteriaDrilldown({ title: `${d.week} WoW ${fmtMaybePct(d.wow_gmv_pct)}`, kicker: "Week", criteria: { week: d.week } });
+    });
     svg.append(dot);
   });
 
@@ -1318,6 +1600,14 @@ function drawBarChart(target, rows, key, valueKey, color = "#f97316", formatter 
     const rect = svgEl("rect", { x, y, width: barW, height: h, rx: 8, fill: color });
     animateRect(rect);
     attachTooltip(rect, `<strong>CPI ${escapeHtml(d[key])}</strong><br>GMV ${fmtMoney(d.gmv)}<br>Orders ${fmtNum(d.orders)}<br>Buyers ${fmtNum(d.buyers)}`);
+    attachChartAction(rect, `CPI ${d[key]} bar`, () => {
+      openCriteriaDrilldown({
+        title: `CPI ${d[key]}`,
+        kicker: "Price band",
+        criteria: { priceBand: d[key] },
+        pin: { type: "priceBand", value: d[key], label: `CPI ${d[key]}` },
+      });
+    });
     svg.append(rect);
 
     const labelNode = svgEl("text", { x: x + barW / 2, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
@@ -1361,6 +1651,14 @@ function drawPriceBandStacked(rows) {
         rect,
         `<strong>${escapeHtml(week.week)} CPI ${escapeHtml(band.band)}</strong><br>GMV ${fmtMoney(band.gmv)}<br>Orders ${fmtNum(band.orders)}<br>Buyers ${fmtNum(band.buyers)}`,
       );
+      attachChartAction(rect, `${week.week} CPI ${band.band}`, () => {
+        openCriteriaDrilldown({
+          title: `${week.week} · CPI ${band.band}`,
+          kicker: "Week + price band",
+          criteria: { week: week.week, priceBand: band.band },
+          pin: { type: "priceBand", value: band.band, label: `CPI ${band.band}` },
+        });
+      });
       svg.append(rect);
     });
 
@@ -1405,6 +1703,14 @@ function drawPriceBandShare(rows) {
         rect,
         `<strong>${escapeHtml(week.week)} CPI ${escapeHtml(band.band)}</strong><br>${pct.toFixed(1)}% of GMV<br>GMV ${fmtMoney(band.gmv)}`,
       );
+      attachChartAction(rect, `${week.week} CPI ${band.band} share`, () => {
+        openCriteriaDrilldown({
+          title: `${week.week} · CPI ${band.band} mix`,
+          kicker: "Week + price band",
+          criteria: { week: week.week, priceBand: band.band },
+          pin: { type: "priceBand", value: band.band, label: `CPI ${band.band}` },
+        });
+      });
       svg.append(rect);
     });
 
@@ -1447,11 +1753,17 @@ function drawStackedNewReturning(rows) {
     const newRect = svgEl("rect", { x: left, y, width: newW, height: rowH, rx: 10, fill: "#f97316" });
     animateRect(newRect, "x");
     attachTooltip(newRect, `<strong>${escapeHtml(d.week)} new GMV</strong><br>${d.new_gmv_pct.toFixed(1)}% of GMV<br>${fmtMoney(d.new_gmv)}`);
+    attachChartAction(newRect, `${d.week} new GMV`, () => {
+      openCriteriaDrilldown({ title: `${d.week} New buyers`, kicker: "Buyer type", criteria: { week: d.week, buyerType: "new" } });
+    });
     svg.append(newRect);
 
     const returningRect = svgEl("rect", { x: left + newW, y, width: width - newW, height: rowH, rx: 10, fill: "#9a5a2e" });
     animateRect(returningRect, "x");
     attachTooltip(returningRect, `<strong>${escapeHtml(d.week)} returning GMV</strong><br>${d.returning_gmv_pct.toFixed(1)}% of GMV<br>${fmtMoney(d.returning_gmv)}`);
+    attachChartAction(returningRect, `${d.week} returning GMV`, () => {
+      openCriteriaDrilldown({ title: `${d.week} Returning buyers`, kicker: "Buyer type", criteria: { week: d.week, buyerType: "returning" } });
+    });
     svg.append(returningRect);
 
     const pctLabel = svgEl("text", { x: left + width + 16, y: y + 30, class: "axis-label" });
@@ -1479,6 +1791,9 @@ function drawBuyerRepeat(rows) {
     const bar = svgEl("rect", { x: x - barW / 2, y, width: barW, height: h, rx: 10, fill: "#f59e0b" });
     animateRect(bar);
     attachTooltip(bar, `<strong>${escapeHtml(d.week)}</strong><br>Buyers ${fmtNum(d.buyers)}<br>Repeat ${d.repeat_rate.toFixed(1)}%`);
+    attachChartAction(bar, `${d.week} buyer count`, () => {
+      openCriteriaDrilldown({ title: `${d.week} Buyer count`, kicker: "Week", criteria: { week: d.week } });
+    });
     svg.append(bar);
     const weekLabel = svgEl("text", { x, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
     weekLabel.textContent = d.week;
@@ -1499,6 +1814,9 @@ function drawBuyerRepeat(rows) {
   points.forEach(([x, y, d]) => {
     const dot = animatedDot({ cx: x, cy: y, r: 6, fill: "#5c8a4b", stroke: "#fffaf4", "stroke-width": 3 });
     attachTooltip(dot, `<strong>${escapeHtml(d.week)} repeat rate</strong><br>${d.repeat_rate.toFixed(1)}%`);
+    attachChartAction(dot, `${d.week} repeat rate`, () => {
+      openCriteriaDrilldown({ title: `${d.week} Repeat rate`, kicker: "Week", criteria: { week: d.week } });
+    });
     svg.append(dot);
   });
 
@@ -1539,6 +1857,9 @@ function drawConversion(rows) {
     points.forEach(([x, y, d]) => {
       const dot = animatedDot({ cx: x, cy: y, r: 5, fill: color, stroke: "#fffaf4", "stroke-width": 2 });
       attachTooltip(dot, `<strong>${escapeHtml(d.week)}</strong><br>${escapeHtml(label)} ${d[field].toFixed(1)}/h`);
+      attachChartAction(dot, `${d.week} ${label} per hour`, () => {
+        openCriteriaDrilldown({ title: `${d.week} ${label}/hr`, kicker: "Conversion proxy", criteria: { week: d.week } });
+      });
       svg.append(dot);
     });
   };
@@ -1625,6 +1946,13 @@ function drawNewReturningAovFrequency(rows) {
         dot,
         `<strong>${escapeHtml(week.week)} ${escapeHtml(type.buyerType)} ${escapeHtml(metric)}</strong><br>${metricLine}<br>Orders ${fmtNum(type.orders)}<br>Buyers ${fmtNum(type.buyers)}`,
       );
+      attachChartAction(dot, `${week.week} ${type.buyerType} ${metric}`, () => {
+        openCriteriaDrilldown({
+          title: `${week.week} ${type.buyerType === "new" ? "New" : "Returning"} ${metric}`,
+          kicker: "Buyer type trend",
+          criteria: { week: week.week, buyerType: type.buyerType },
+        });
+      });
       svg.append(dot);
     });
   };
@@ -1701,6 +2029,10 @@ function drawWaterfallChart(comparisonRows) {
       rect,
       `<strong>${escapeHtml(item.label)}</strong><br>${item.type === "total" ? "GMV" : "Impact"} ${fmtMoney(item.value)}<br>From ${fmtMoney(item.start)} to ${fmtMoney(item.end)}`,
     );
+    attachChartAction(rect, `${item.label} waterfall`, () => {
+      const label = item.label === "Orders" || item.label === "AOV / mix" ? focus.label : item.label;
+      openCriteriaDrilldown({ title: `${item.label} waterfall detail`, kicker: "Waterfall", criteria: { week: label } });
+    });
     svg.append(rect);
 
     if (index < items.length - 1) {
@@ -1772,6 +2104,14 @@ function drawCpiShareDonut(rows) {
       path,
       `<strong>CPI ${escapeHtml(band.band)}</strong><br>${((band.gmv / total) * 100).toFixed(1)}% of GMV<br>GMV ${fmtMoney(band.gmv)}<br>Orders ${fmtNum(band.orders)}<br>Buyers ${fmtNum(band.buyers)}`,
     );
+    attachChartAction(path, `CPI ${band.band} donut share`, () => {
+      openCriteriaDrilldown({
+        title: `CPI ${band.band} share`,
+        kicker: "Price band",
+        criteria: { priceBand: band.band },
+        pin: { type: "priceBand", value: band.band, label: `CPI ${band.band}` },
+      });
+    });
     svg.append(path);
     cursor += slice;
   });
@@ -1875,6 +2215,14 @@ function drawProductMomentum(comparisonRows) {
       bubble,
       `<strong>${escapeHtml(item.product)}</strong><br>${escapeHtml(focus.label)} GMV ${fmtMoney(item.currentGmv)}<br>${escapeHtml(focus.prevLabel)} GMV ${fmtMoney(item.previousGmv)}<br>Change ${fmtMoney(item.delta)}${Number.isFinite(item.wow) ? ` (${fmtMaybePct(item.wow)})` : ""}<br>Orders ${fmtNum(item.orders)} · Buyers ${fmtNum(item.buyers)}<br>AOV ${fmtMoney(item.aov)}`,
     );
+    attachChartAction(bubble, `${item.product} product momentum`, () => {
+      openCriteriaDrilldown({
+        title: item.product,
+        kicker: "Product momentum",
+        criteria: { product: item.product },
+        pin: { type: "product", value: item.product, label: item.product.length > 30 ? `${item.product.slice(0, 30)}...` : item.product },
+      });
+    });
     svg.append(bubble);
 
     if (index < 10 && r >= 13) {
@@ -1944,6 +2292,15 @@ function drawWeekdayHeatmap(rows) {
         rect,
         `<strong>${escapeHtml(week)} ${escapeHtml(cell.day)}</strong><br>GMV ${fmtMoney(cell.gmv)}<br>Orders ${fmtNum(cell.orders)}<br>Buyers ${fmtNum(cell.buyers)}`,
       );
+      attachChartAction(rect, `${week} ${cell.day} heatmap cell`, () => {
+        const weekInfo = state.data.weeks.find((item) => item.label === week);
+        const date = weekInfo ? isoDate(addDays(parseDateValue(weekInfo.start), dayIndex)) : null;
+        openCriteriaDrilldown({
+          title: `${week} ${cell.day}`,
+          kicker: "Broadcast day",
+          criteria: { week, ...(date ? { date } : {}) },
+        });
+      });
       svg.append(rect);
 
       if (cell.gmv > 0) {
@@ -2008,7 +2365,7 @@ function renderTable(rows) {
   } else {
     tbody.replaceChildren(
       ...products.slice(0, 30).map((item) =>
-        el("tr", {}, [
+        el("tr", { class: "product-row", tabindex: "0", "data-product": item.product }, [
           el("td", {}, [el("span", { class: "product-name" }, [document.createTextNode(item.product)])]),
           el("td", {}, [document.createTextNode(fmtMoney(item.gmv))]),
           el("td", {}, [document.createTextNode(fmtNum(item.orders))]),
@@ -2018,6 +2375,24 @@ function renderTable(rows) {
       ),
     );
   }
+
+  tbody.querySelectorAll(".product-row").forEach((row) => {
+    const openProduct = () => {
+      const product = row.dataset.product;
+      openCriteriaDrilldown({
+        title: product,
+        kicker: "Product",
+        criteria: { product },
+        pin: { type: "product", value: product, label: product.length > 30 ? `${product.slice(0, 30)}...` : product },
+      });
+    };
+    row.addEventListener("click", openProduct);
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openProduct();
+    });
+  });
 
   updateSortButtons();
   document.querySelector("#tableCaption").textContent = `${products.length} products matched current filters.`;
@@ -2029,8 +2404,10 @@ function render() {
   const rollingRows = comparisonRows;
   const buyerComparisonRows = getFilteredRows({ ignoreWeek: true, ignoreBuyerType: true });
   renderActiveFilters();
+  renderPins();
   renderKpis(rows, comparisonRows);
   renderInsights(rows, comparisonRows);
+  renderAlerts(comparisonRows);
   drawWeeklyGmv(comparisonRows);
   drawBarChart("#priceBandChart", summarizePriceBandsFromRows(rows), "band", "gmv", "#f97316", fmtMoney, "GMV by CPI target band under current filters");
   drawPriceBandStacked(rollingRows);
@@ -2060,11 +2437,13 @@ async function init() {
     state.data = cloneData(state.baseData);
     loadUploads();
     loadKpiTiles();
+    loadPins();
     if (state.uploadedRows.length) state.data = rebuildDataWithUploads();
 
     document.querySelector("#sourceNote").textContent = state.data.source_note;
     document.querySelector("#generatedAt").textContent = `Updated ${state.data.generated_at}`;
     setOptions();
+    renderProductSuggestions();
 
     document.querySelector("#weekFilter").addEventListener("change", (event) => {
       state.week = event.target.value;
@@ -2099,6 +2478,16 @@ async function init() {
       saveUploads();
       updateUploadStatus("CSV override cleared. Showing generated SQL/Drive data.");
       refreshDataAfterUpload();
+    });
+    document.querySelector("#clearPins").addEventListener("click", () => {
+      state.pins = [];
+      savePins();
+      renderPins();
+    });
+    document.querySelector("#closeDrilldown").addEventListener("click", closeDrilldown);
+    document.querySelector("#drawerScrim").addEventListener("click", closeDrilldown);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeDrilldown();
     });
     document.querySelector("#resetFilters").addEventListener("click", () => {
       state.week = "all";

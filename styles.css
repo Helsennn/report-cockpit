@@ -344,6 +344,71 @@ button:active {
   font-weight: 750;
 }
 
+.pin-panel {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.pin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.pin-head span {
+  color: var(--brown);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.pin-head button {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.pin-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pin-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pin-chip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  border-radius: 12px;
+  text-align: left;
+  white-space: normal;
+}
+
+.pin-chip span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pin-chip strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .dashboard {
   padding: 30px clamp(18px, 2.6vw, 34px) 42px;
 }
@@ -429,6 +494,39 @@ button {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 14px;
+}
+
+.alert-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 0;
+  margin: -2px 0 14px;
+}
+
+.alert-chip {
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 6px 11px;
+  font-size: 13px;
+}
+
+.alert-chip.positive {
+  border-color: rgba(92, 138, 75, 0.3);
+  background: rgba(92, 138, 75, 0.1);
+  color: #496f3d;
+}
+
+.alert-chip.negative {
+  border-color: rgba(220, 91, 66, 0.3);
+  background: rgba(220, 91, 66, 0.1);
+  color: #a94330;
+}
+
+.alert-chip.warm {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(245, 158, 11, 0.11);
+  color: #8a5608;
 }
 
 .kpi-grid {
@@ -577,6 +675,10 @@ button {
   overflow: hidden;
 }
 
+.panel-highlight {
+  animation: panelPulse 1300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 .panel.wide {
   grid-column: auto;
 }
@@ -661,21 +763,43 @@ button {
 
 .chart-hotspot {
   cursor: crosshair;
-  transition: opacity 160ms ease, filter 160ms ease;
+  outline: none;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 160ms ease, filter 160ms ease, stroke-width 160ms ease, transform 160ms ease;
 }
 
-.chart-hotspot:hover {
-  opacity: 0.82;
-  filter: saturate(1.12);
+.chart-action {
+  cursor: pointer;
+}
+
+.chart-hotspot:hover,
+.chart-hotspot:focus-visible {
+  opacity: 0.94;
+  filter: saturate(1.18) drop-shadow(0 8px 12px rgba(84, 50, 22, 0.24));
+  stroke: #fffaf4;
+  stroke-width: 3;
+}
+
+.chart-hotspot.chart-dot:hover,
+.chart-hotspot.chart-dot:focus-visible {
+  transform: scale(1.18);
+}
+
+.animated-slice.chart-hotspot:hover,
+.animated-slice.chart-hotspot:focus-visible {
+  transform: scale(1.035);
 }
 
 .line-hit-area {
   pointer-events: stroke;
 }
 
-.line-hit-area:hover {
+.line-hit-area:hover,
+.line-hit-area:focus-visible {
   opacity: 1;
-  filter: none;
+  filter: drop-shadow(0 8px 12px rgba(84, 50, 22, 0.18));
+  stroke-width: 28;
 }
 
 .animated-bar {
@@ -741,6 +865,21 @@ button {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes panelPulse {
+  0% {
+    border-color: var(--orange);
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.28), var(--shadow);
+  }
+  54% {
+    border-color: var(--orange);
+    box-shadow: 0 0 0 8px rgba(249, 115, 22, 0.08), var(--shadow);
+  }
+  100% {
+    border-color: var(--line);
+    box-shadow: var(--shadow);
   }
 }
 
@@ -831,6 +970,17 @@ th {
   -webkit-box-orient: vertical;
 }
 
+.product-row {
+  cursor: pointer;
+  outline: none;
+  transition: background 140ms ease;
+}
+
+.product-row:hover,
+.product-row:focus-visible {
+  background: #fff4e8;
+}
+
 .positive {
   color: var(--green);
 }
@@ -865,6 +1015,145 @@ th {
 
 .tooltip.is-visible {
   opacity: 1;
+}
+
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  pointer-events: none;
+  background: rgba(23, 17, 13, 0.18);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.drawer-scrim.is-visible {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.drilldown {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  width: min(460px, 92vw);
+  border-left: 1px solid var(--line);
+  background: rgba(255, 253, 249, 0.96);
+  box-shadow: -18px 0 44px rgba(84, 50, 22, 0.15);
+  transform: translateX(104%);
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  backdrop-filter: blur(18px);
+}
+
+.drilldown.is-open {
+  transform: translateX(0);
+}
+
+.drilldown-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 22px 22px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.drilldown-head span {
+  color: var(--brown);
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.drilldown-head h2 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  line-height: 1.16;
+}
+
+#closeDrilldown {
+  display: grid;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  place-items: center;
+  padding: 0;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.drilldown-body {
+  height: calc(100% - 92px);
+  overflow: auto;
+  padding: 18px 22px 28px;
+}
+
+.drill-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.drill-metrics div {
+  min-height: 74px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fffaf4;
+  padding: 12px;
+}
+
+.drill-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.drill-metrics strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 21px;
+}
+
+.drill-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 18px;
+}
+
+.drill-actions button {
+  min-height: 38px;
+  padding: 7px 12px;
+}
+
+.drilldown-body h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.drill-table {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.drill-table table {
+  min-width: 420px;
+  font-size: 14px;
+}
+
+.drill-table th,
+.drill-table td {
+  padding: 10px;
+}
+
+.drill-table th:first-child,
+.drill-table td:first-child {
+  width: 48%;
 }
 
 @media (prefers-reduced-motion: reduce) {

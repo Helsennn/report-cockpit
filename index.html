@@ -48,7 +48,8 @@
 
           <section class="control-group">
             <label for="productSearch">Product search</label>
-            <input id="productSearch" type="search" placeholder="camera, kit, fan..." />
+            <input id="productSearch" type="search" placeholder="camera, kit, fan..." list="productSuggestions" />
+            <datalist id="productSuggestions"></datalist>
           </section>
         </form>
 
@@ -72,6 +73,14 @@
           <div id="activeFilters"></div>
         </section>
 
+        <section class="pin-panel" aria-label="Pinned comparisons">
+          <div class="pin-head">
+            <span>Pinned compare</span>
+            <button id="clearPins" type="button">Clear</button>
+          </div>
+          <div id="pinList" class="pin-list"></div>
+        </section>
+
         <section class="note">
           <span>Source</span>
           <p id="sourceNote">Loading data...</p>
@@ -88,6 +97,8 @@
         </header>
 
         <section class="insight-grid" id="insightGrid" aria-label="Key insights"></section>
+
+        <section class="alert-rail" id="alertRail" aria-label="Detected anomalies"></section>
 
         <section class="kpi-grid" id="kpiGrid"></section>
 
@@ -269,6 +280,17 @@
       </main>
     </div>
 
+    <aside class="drilldown" id="drilldownPanel" aria-hidden="true" aria-label="Drill-down details">
+      <div class="drilldown-head">
+        <div>
+          <span id="drilldownKicker">Selection</span>
+          <h2 id="drilldownTitle">Details</h2>
+        </div>
+        <button id="closeDrilldown" type="button" aria-label="Close details">×</button>
+      </div>
+      <div class="drilldown-body" id="drilldownBody"></div>
+    </aside>
+    <div class="drawer-scrim" id="drawerScrim" aria-hidden="true"></div>
     <div class="tooltip" id="tooltip" role="tooltip"></div>
     <script src="./data.js"></script>
     <script src="./app.js"></script>
