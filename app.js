@@ -138,6 +138,17 @@ function attachTooltip(node, html) {
   node.addEventListener("blur", hideTooltip);
 }
 
+function attachHtmlTooltip(node, html) {
+  node.addEventListener("mouseenter", (event) => showTooltip(html, event.clientX, event.clientY));
+  node.addEventListener("mousemove", (event) => showTooltip(html, event.clientX, event.clientY));
+  node.addEventListener("mouseleave", hideTooltip);
+  node.addEventListener("focus", () => {
+    const box = node.getBoundingClientRect();
+    showTooltip(html, box.left + box.width / 2, box.top);
+  });
+  node.addEventListener("blur", hideTooltip);
+}
+
 function cloneData(data) {
   return JSON.parse(JSON.stringify(data));
 }
@@ -965,7 +976,12 @@ function renderKpis(rows, comparisonRows) {
 
   document.querySelector("#kpiGrid").replaceChildren(
     ...selectedCards.map((card) =>
-      el("article", { class: "kpi", "data-kpi": card.id }, [
+      el("article", {
+        class: "kpi",
+        "data-kpi": card.id,
+        "data-kpi-tooltip": `${card.label}: ${card.value}. ${card.sub}. ${describeActiveScope()}`,
+        tabindex: "0",
+      }, [
         el("div", { class: "kpi-head" }, [
           el("span", {}, [document.createTextNode(card.label)]),
           el("button", { type: "button", class: "kpi-remove", "data-kpi-remove": card.id, "aria-label": `Remove ${card.label}` }, [document.createTextNode("×")]),
@@ -979,6 +995,9 @@ function renderKpis(rows, comparisonRows) {
 
   document.querySelectorAll("[data-kpi-remove]").forEach((button) => {
     button.addEventListener("click", () => removeKpiTile(button.dataset.kpiRemove));
+  });
+  document.querySelectorAll("[data-kpi-tooltip]").forEach((card) => {
+    attachHtmlTooltip(card, escapeHtml(card.dataset.kpiTooltip));
   });
   const addSelect = document.querySelector(".kpi-add select");
   if (addSelect) {
