@@ -3,6 +3,8 @@ const state = {
   baseData: null,
   uploadedRows: [],
   uploadedReplaceDates: true,
+  excludeSpecialPurchases: true,
+  specialRulesText: "",
   kpiTiles: [],
   pins: [],
   week: "all",
@@ -36,9 +38,12 @@ const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const uploadStorageKey = "homeDashboardCsvUploadV1";
 const kpiStorageKey = "homeDashboardKpiTilesV1";
 const pinsStorageKey = "homeDashboardPinsV1";
+const specialStorageKey = "homeDashboardExcludeSpecialV1";
+const specialRulesStorageKey = "homeDashboardSpecialRulesV1";
 const broadcastDayCutoffHour = 3;
 const rollingWeekCount = 4;
 const maxKpiTiles = 10;
+const defaultSpecialRulesText = "530, 531, mayday:, *event*";
 const defaultKpiTiles = ["gmv", "orders", "buyers", "aov", "wow", "gmvPerHour"];
 const kpiPanelTargets = {
   gmv: "#weeklyGmvChart",
@@ -193,6 +198,7 @@ function rowsForCriteria(criteria = {}) {
     if (criteria.product && row.product !== criteria.product) return false;
     if (criteria.date && (row.broadcast_date || row.date) !== criteria.date) return false;
     if (!criteria.product && state.query && !row.product.toLowerCase().includes(state.query)) return false;
+    if (!criteria.includeSpecial && state.excludeSpecialPurchases && isSpecialPurchase(row)) return false;
     return true;
   });
 }
@@ -202,6 +208,8 @@ function syncFilterControls() {
   document.querySelector("#priceBandFilter").value = state.priceBand;
   document.querySelector("#buyerTypeFilter").value = state.buyerType;
   document.querySelector("#productSearch").value = state.query;
+  document.querySelector("#excludeSpecialToggle").checked = state.excludeSpecialPurchases;
+  document.querySelector("#specialRulesInput").value = state.specialRulesText;
 }
 
 function applyChartFilters(criteria = {}) {
@@ -249,6 +257,63 @@ function loadPins() {
   } catch {
     state.pins = [];
   }
+}
+
+function saveSpecialPreference() {
+  try {
+    localStorage.setItem(specialStorageKey, JSON.stringify(state.excludeSpecialPurchases));
+    localStorage.setItem(specialRulesStorageKey, state.specialRulesText);
+  } catch {
+    // Preference storage is optional; the dashboard defaults to the cleaner assortment view.
+  }
+}
+
+function loadSpecialPreference() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(specialStorageKey) || "null");
+    state.excludeSpecialPurchases = typeof saved === "boolean" ? saved : true;
+    state.specialRulesText = localStorage.getItem(specialRulesStorageKey) || defaultSpecialRulesText;
+  } catch {
+    state.excludeSpecialPurchases = true;
+    state.specialRulesText = defaultSpecialRulesText;
+  }
+}
+
+function normalizeMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replaceAll("：", ":")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parsedSpecialRules() {
+  const rawRules = String(state.specialRulesText || defaultSpecialRulesText)
+    .split(/[,\n]/)
+    .map((rule) => normalizeMatchText(rule))
+    .filter(Boolean);
+  const seen = new Set();
+  return rawRules.flatMap((rule) => {
+    const isContains = rule.includes("*");
+    const value = normalizeMatchText(rule.replaceAll("*", ""));
+    if (!value || seen.has(`${isContains}:${value}`)) return [];
+    seen.add(`${isContains}:${value}`);
+    return [{ value, mode: isContains ? "contains" : "prefix" }];
+  });
+}
+
+function specialPurchaseReason(row) {
+  const product = normalizeMatchText(row.product);
+  if (!product) return "";
+  const rule = parsedSpecialRules().find((item) =>
+    item.mode === "contains" ? product.includes(item.value) : product.startsWith(item.value),
+  );
+  if (!rule) return "";
+  return rule.mode === "contains" ? `contains ${rule.value}` : `prefix ${rule.value}`;
+}
+
+function isSpecialPurchase(row) {
+  return Boolean(specialPurchaseReason(row));
 }
 
 function addPin(pin) {
@@ -306,6 +371,7 @@ function openDrilldown({ title, kicker = "Drill-down", rows, criteria = {}, pin 
 
   const metrics = metricCards(rows);
   const products = topProductsRows(rows, 10);
+  const canApplyFilter = Object.keys(criteria).some((key) => key !== "includeSpecial");
   body.replaceChildren(
     el("section", { class: "drill-metrics" }, metrics.map(([label, value]) =>
       el("div", {}, [
@@ -314,7 +380,7 @@ function openDrilldown({ title, kicker = "Drill-down", rows, criteria = {}, pin 
       ]),
     )),
     el("div", { class: "drill-actions" }, [
-      el("button", { type: "button", id: "applyDrillFilter" }, [document.createTextNode("Apply filter")]),
+      ...(canApplyFilter ? [el("button", { type: "button", id: "applyDrillFilter" }, [document.createTextNode("Apply filter")])] : []),
       ...(pin ? [el("button", { type: "button", id: "pinSelection" }, [document.createTextNode("Pin compare")])] : []),
     ]),
     el("h3", {}, [document.createTextNode("Top products")]),
@@ -780,6 +846,7 @@ function getFilteredRows(options = {}) {
     ignoreWeek = false,
     ignorePriceBand = false,
     ignoreBuyerType = false,
+    includeSpecial = false,
   } = options;
   const data = state.data;
   return data.records.filter((row) => {
@@ -787,6 +854,7 @@ function getFilteredRows(options = {}) {
     if (!ignorePriceBand && state.priceBand !== "all" && row.price_band !== state.priceBand) return false;
     if (state.query && !row.product.toLowerCase().includes(state.query)) return false;
     if (!ignoreBuyerType && state.buyerType !== "all" && row.buyer_type !== state.buyerType) return false;
+    if (!includeSpecial && state.excludeSpecialPurchases && isSpecialPurchase(row)) return false;
     return true;
   });
 }
@@ -1231,10 +1299,12 @@ function renderKpis(rows, comparisonRows) {
 }
 
 function renderActiveFilters() {
+  const ruleCount = parsedSpecialRules().length;
   const filters = [
     ["Week", state.week === "all" ? "All rolling 4 weeks" : state.week],
     ["CPI", state.priceBand === "all" ? "All CPI bands" : state.priceBand],
     ["Buyer", state.buyerType === "all" ? "New + returning" : state.buyerType],
+    ["Special", state.excludeSpecialPurchases ? `${ruleCount} rules excluded` : "included"],
   ];
   if (state.query) filters.push(["Product", state.query]);
 
@@ -1245,6 +1315,55 @@ function renderActiveFilters() {
         document.createTextNode(value),
       ]),
     ),
+  );
+}
+
+function specialPurchaseRowsForCurrentScope() {
+  if (!state.excludeSpecialPurchases) return [];
+  return getFilteredRows({ includeSpecial: true }).filter(isSpecialPurchase);
+}
+
+function summarizeSpecialPurchases(rows) {
+  const byProduct = aggregateProducts(rows)
+    .map((item) => {
+      const sample = rows.find((row) => row.product === item.product);
+      return { ...item, reason: specialPurchaseReason(sample) || "manual flag" };
+    })
+    .sort((a, b) => b.gmv - a.gmv || b.orders - a.orders);
+  return {
+    metrics: aggregateRows(rows),
+    products: byProduct,
+  };
+}
+
+function renderSpecialPurchaseSummary() {
+  const host = document.querySelector("#specialSummary");
+  const button = document.querySelector("#viewSpecialBuys");
+  if (!host || !button) return;
+
+  if (!state.excludeSpecialPurchases) {
+    host.replaceChildren(el("p", {}, [document.createTextNode("Special buys are included in this view.")]));
+    button.disabled = true;
+    return;
+  }
+
+  const rows = specialPurchaseRowsForCurrentScope();
+  const summary = summarizeSpecialPurchases(rows);
+  const top = summary.products.slice(0, 3);
+  button.disabled = rows.length === 0;
+  const ruleLabels = parsedSpecialRules().map((rule) => rule.mode === "contains" ? `*${rule.value}*` : rule.value).join(", ");
+  host.replaceChildren(
+    el("div", { class: "special-stat" }, [
+      el("strong", {}, [document.createTextNode(fmtMoney(summary.metrics.gmv))]),
+      el("span", {}, [document.createTextNode(`${fmtNum(summary.metrics.orders)} orders · ${fmtNum(summary.products.length)} products removed`)]),
+    ]),
+    el("p", { class: "special-rule-line" }, [document.createTextNode(ruleLabels ? `Rules: ${ruleLabels}` : "No rules entered.")]),
+    ...(top.length ? [el("ul", {}, top.map((item) =>
+      el("li", {}, [
+        el("span", {}, [document.createTextNode(item.product)]),
+        el("em", {}, [document.createTextNode(fmtMoney(item.gmv))]),
+      ]),
+    ))] : [el("p", {}, [document.createTextNode("No 530 / event products found in this scope.")])]),
   );
 }
 
@@ -2404,6 +2523,7 @@ function render() {
   const rollingRows = comparisonRows;
   const buyerComparisonRows = getFilteredRows({ ignoreWeek: true, ignoreBuyerType: true });
   renderActiveFilters();
+  renderSpecialPurchaseSummary();
   renderPins();
   renderKpis(rows, comparisonRows);
   renderInsights(rows, comparisonRows);
@@ -2438,6 +2558,7 @@ async function init() {
     loadUploads();
     loadKpiTiles();
     loadPins();
+    loadSpecialPreference();
     if (state.uploadedRows.length) state.data = rebuildDataWithUploads();
 
     document.querySelector("#sourceNote").textContent = state.data.source_note;
@@ -2461,6 +2582,18 @@ async function init() {
       state.query = event.target.value.trim().toLowerCase();
       render();
     }));
+    document.querySelector("#excludeSpecialToggle").checked = state.excludeSpecialPurchases;
+    document.querySelector("#excludeSpecialToggle").addEventListener("change", (event) => {
+      state.excludeSpecialPurchases = event.target.checked;
+      saveSpecialPreference();
+      render();
+    });
+    document.querySelector("#specialRulesInput").value = state.specialRulesText;
+    document.querySelector("#specialRulesInput").addEventListener("input", debounce((event) => {
+      state.specialRulesText = event.target.value.trim();
+      saveSpecialPreference();
+      render();
+    }, 220));
     document.querySelector("#csvUpload").addEventListener("change", (event) => {
       handleCsvUpload([...event.target.files]).catch((error) => updateUploadStatus(error.message));
       event.target.value = "";
@@ -2484,6 +2617,15 @@ async function init() {
       savePins();
       renderPins();
     });
+    document.querySelector("#viewSpecialBuys").addEventListener("click", () => {
+      const rows = specialPurchaseRowsForCurrentScope();
+      openDrilldown({
+        title: "Excluded 530 / event special buys",
+        kicker: "Special buy exclusions",
+        rows,
+        criteria: { includeSpecial: true },
+      });
+    });
     document.querySelector("#closeDrilldown").addEventListener("click", closeDrilldown);
     document.querySelector("#drawerScrim").addEventListener("click", closeDrilldown);
     document.addEventListener("keydown", (event) => {
@@ -2494,10 +2636,15 @@ async function init() {
       state.priceBand = "all";
       state.buyerType = "all";
       state.query = "";
+      state.excludeSpecialPurchases = true;
+      state.specialRulesText = defaultSpecialRulesText;
+      saveSpecialPreference();
       document.querySelector("#weekFilter").value = "all";
       document.querySelector("#priceBandFilter").value = "all";
       document.querySelector("#buyerTypeFilter").value = "all";
       document.querySelector("#productSearch").value = "";
+      document.querySelector("#excludeSpecialToggle").checked = true;
+      document.querySelector("#specialRulesInput").value = defaultSpecialRulesText;
       render();
     });
     document.querySelectorAll(".sort-button").forEach((button) => {
