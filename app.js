@@ -14,6 +14,7 @@ const state = {
   query: "",
   selectedDates: [],
   stageMode: "split",
+  productMomentumMode: "week",
   sortKey: "gmv",
   sortDir: "desc",
 };
@@ -323,6 +324,18 @@ function renderStageMode() {
   if (label) label.textContent = labelText;
   document.querySelectorAll(".stage-switch [data-stage-mode]").forEach((button) => {
     button.setAttribute("aria-pressed", button.dataset.stageMode === state.stageMode ? "true" : "false");
+  });
+}
+
+function renderProductMomentumMode() {
+  const copy = document.querySelector("#productMomentumCopy");
+  if (copy) {
+    copy.textContent = state.productMomentumMode === "day"
+      ? "Selected active day vs prior active day, sized by orders and showing CPI."
+      : "Selected week vs prior week, sized by orders and showing CPI.";
+  }
+  document.querySelectorAll("[data-momentum-mode]").forEach((button) => {
+    button.setAttribute("aria-pressed", button.dataset.momentumMode === state.productMomentumMode ? "true" : "false");
   });
 }
 
@@ -1147,11 +1160,13 @@ function aggregateProducts(rows) {
   const map = new Map();
   rows.forEach((row) => {
     if (!map.has(row.product)) {
-      map.set(row.product, { product: row.product, gmv: 0, orders: 0, buyers: new Set() });
+      map.set(row.product, { product: row.product, gmv: 0, orders: 0, buyers: new Set(), targetCost: 0 });
     }
     const item = map.get(row.product);
+    const orders = rowOrders(row);
     item.gmv += rowGmv(row);
-    item.orders += rowOrders(row);
+    item.orders += orders;
+    item.targetCost += Number(row.target_price || 0) * orders;
     if (rowBuyer(row)) item.buyers.add(rowBuyer(row));
   });
 
@@ -1161,6 +1176,8 @@ function aggregateProducts(rows) {
     orders: item.orders,
     buyers: item.buyers.size,
     aov: item.orders ? item.gmv / item.orders : 0,
+    cpi: item.orders ? item.targetCost / item.orders : 0,
+    targetCost: item.targetCost,
   }));
 }
 
@@ -1223,22 +1240,7 @@ function describeActiveScope() {
 }
 
 function groupedProducts(rows) {
-  const map = new Map();
-  rows.forEach((row) => {
-    if (!map.has(row.product)) {
-      map.set(row.product, { product: row.product, gmv: 0, orders: 0, buyers: new Set() });
-    }
-    const item = map.get(row.product);
-    item.gmv += rowGmv(row);
-    item.orders += rowOrders(row);
-    if (rowBuyer(row)) item.buyers.add(rowBuyer(row));
-  });
-
-  return [...map.values()].map((item) => ({
-    ...item,
-    buyers: item.buyers.size,
-    aov: item.orders ? item.gmv / item.orders : 0,
-  }));
+  return aggregateProducts(rows);
 }
 
 function sortedProducts(rows) {
@@ -2522,20 +2524,55 @@ function drawCpiShareDonut(rows) {
   svg.append(note);
 }
 
-function drawProductMomentum(comparisonRows) {
-  const svg = chartScaffold("#productMomentumChart", "0 0 940 430", "Product GMV momentum bubble chart");
+function productMomentumContext(comparisonRows) {
+  if (state.productMomentumMode === "day") {
+    const allDates = selectableInWeekDates();
+    const activeDates = activeInWeekDates().filter((date) => allDates.includes(date));
+    const currentDate = activeDates[activeDates.length - 1];
+    const currentIndex = allDates.indexOf(currentDate);
+    const previousDate = activeDates.length >= 2 ? activeDates[activeDates.length - 2] : allDates[currentIndex - 1];
+    if (!currentDate || !previousDate) {
+      return { error: "Select at least two active selling days for day momentum." };
+    }
+    const weekRows = baseRowsForWeek(focusWeekLabel());
+    return {
+      currentLabel: shortDateLabel(currentDate),
+      previousLabel: shortDateLabel(previousDate),
+      currentRows: weekRows.filter((row) => (row.broadcast_date || row.date) === currentDate),
+      previousRows: weekRows.filter((row) => (row.broadcast_date || row.date) === previousDate),
+      xLabel: `${shortDateLabel(currentDate)} GMV`,
+      yLabel: `Vertical axis: GMV change vs ${shortDateLabel(previousDate)}`,
+    };
+  }
+
   const focus = focusWeekContext(comparisonRows);
   if (!focus.prevLabel) {
-    drawEmptyChart(svg, "No prior week available for momentum comparison.", 470, 210);
+    return { error: "No prior week available for momentum comparison." };
+  }
+  return {
+    currentLabel: focus.label,
+    previousLabel: focus.prevLabel,
+    currentRows: rowsForWeek(comparisonRows, focus.label),
+    previousRows: rowsForWeek(comparisonRows, focus.prevLabel),
+    xLabel: `${focus.label} GMV`,
+    yLabel: `Vertical axis: GMV change vs ${focus.prevLabel}`,
+  };
+}
+
+function drawProductMomentum(comparisonRows) {
+  const svg = chartScaffold("#productMomentumChart", "0 0 940 430", "Product GMV momentum bubble chart");
+  const context = productMomentumContext(comparisonRows);
+  if (context.error) {
+    drawEmptyChart(svg, context.error, 470, 210);
     return;
   }
 
-  const current = new Map(aggregateProducts(rowsForWeek(comparisonRows, focus.label)).map((item) => [item.product, item]));
-  const previous = new Map(aggregateProducts(rowsForWeek(comparisonRows, focus.prevLabel)).map((item) => [item.product, item]));
+  const current = new Map(aggregateProducts(context.currentRows).map((item) => [item.product, item]));
+  const previous = new Map(aggregateProducts(context.previousRows).map((item) => [item.product, item]));
   const names = new Set([...current.keys(), ...previous.keys()]);
   const products = [...names].map((product) => {
-    const cur = current.get(product) || { gmv: 0, orders: 0, buyers: 0, aov: 0 };
-    const prev = previous.get(product) || { gmv: 0, orders: 0, buyers: 0, aov: 0 };
+    const cur = current.get(product) || { gmv: 0, orders: 0, buyers: 0, aov: 0, cpi: 0, targetCost: 0 };
+    const prev = previous.get(product) || { gmv: 0, orders: 0, buyers: 0, aov: 0, cpi: 0, targetCost: 0 };
     return {
       product,
       currentGmv: cur.gmv,
@@ -2545,6 +2582,8 @@ function drawProductMomentum(comparisonRows) {
       orders: cur.orders,
       buyers: cur.buyers,
       aov: cur.aov,
+      cpi: cur.cpi,
+      targetCost: cur.targetCost,
     };
   })
     .filter((item) => item.currentGmv > 0 || item.previousGmv > 0)
@@ -2585,10 +2624,10 @@ function drawProductMomentum(comparisonRows) {
   const zeroY = yScale(0);
   svg.append(svgEl("line", { x1: left, y1: zeroY, x2: left + width, y2: zeroY, stroke: "#d9c6b5", "stroke-width": 2 }));
   const xLabel = svgEl("text", { x: left + width, y: top + height + 38, "text-anchor": "end", class: "chart-title-note" });
-  xLabel.textContent = `${focus.label} GMV`;
+  xLabel.textContent = context.xLabel;
   svg.append(xLabel);
   const yLabel = svgEl("text", { x: left, y: top - 18, class: "chart-title-note" });
-  yLabel.textContent = `Vertical axis: GMV change vs ${focus.prevLabel}`;
+  yLabel.textContent = context.yLabel;
   svg.append(yLabel);
 
   products.forEach((item, index) => {
@@ -2599,7 +2638,7 @@ function drawProductMomentum(comparisonRows) {
     const bubble = animatedDot({ cx, cy, r, fill, opacity: 0.78, stroke: "#fffaf4", "stroke-width": 2 });
     attachTooltip(
       bubble,
-      `<strong>${escapeHtml(item.product)}</strong><br>${escapeHtml(focus.label)} GMV ${fmtMoney(item.currentGmv)}<br>${escapeHtml(focus.prevLabel)} GMV ${fmtMoney(item.previousGmv)}<br>Change ${fmtMoney(item.delta)}${Number.isFinite(item.wow) ? ` (${fmtMaybePct(item.wow)})` : ""}<br>Orders ${fmtNum(item.orders)} · Buyers ${fmtNum(item.buyers)}<br>AOV ${fmtMoney(item.aov)}`,
+      `<strong>${escapeHtml(item.product)}</strong><br>${escapeHtml(context.currentLabel)} GMV ${fmtMoney(item.currentGmv)}<br>${escapeHtml(context.previousLabel)} GMV ${fmtMoney(item.previousGmv)}<br>Change ${fmtMoney(item.delta)}${Number.isFinite(item.wow) ? ` (${fmtMaybePct(item.wow)})` : ""}<br>Orders ${fmtNum(item.orders)} · Buyers ${fmtNum(item.buyers)}<br>AOV ${fmtMoney(item.aov)} · CPI ${fmtMoney(item.cpi)}<br>Est. target cost ${fmtMoney(item.targetCost)}`,
     );
     attachChartAction(bubble, `${item.product} product momentum`, () => {
       openCriteriaDrilldown({
@@ -2662,6 +2701,7 @@ function drawWeekdayHeatmap(rows) {
     weekLabel.textContent = week;
     svg.append(weekLabel);
     map.get(week).forEach((cell, dayIndex) => {
+      const buyerCount = cell.buyers instanceof Set ? cell.buyers.size : cell.buyers;
       const intensity = cell.gmv / max;
       const fill = `rgba(249, 115, 22, ${0.12 + intensity * 0.78})`;
       const rect = svgEl("rect", {
@@ -2676,7 +2716,7 @@ function drawWeekdayHeatmap(rows) {
       animateRect(rect);
       attachTooltip(
         rect,
-        `<strong>${escapeHtml(week)} ${escapeHtml(cell.day)}</strong><br>GMV ${fmtMoney(cell.gmv)}<br>Orders ${fmtNum(cell.orders)}<br>Buyers ${fmtNum(cell.buyers)}`,
+        `<strong>${escapeHtml(week)} ${escapeHtml(cell.day)}</strong><br>GMV ${fmtMoney(cell.gmv)}<br>Orders ${fmtNum(cell.orders)}<br>Buyers ${fmtNum(buyerCount)}`,
       );
       attachChartAction(rect, `${week} ${cell.day} heatmap cell`, () => {
         const weekInfo = state.data.weeks.find((item) => item.label === week);
@@ -3129,7 +3169,7 @@ function renderTable(rows) {
   if (!products.length) {
     tbody.replaceChildren(
       el("tr", {}, [
-        el("td", { colspan: "5", class: "empty-state" }, [
+        el("td", { colspan: "7", class: "empty-state" }, [
           document.createTextNode("No products match the current filters."),
         ]),
       ]),
@@ -3143,6 +3183,8 @@ function renderTable(rows) {
           el("td", {}, [document.createTextNode(fmtNum(item.orders))]),
           el("td", {}, [document.createTextNode(fmtNum(item.buyers))]),
           el("td", {}, [document.createTextNode(fmtMoney(item.aov))]),
+          el("td", {}, [document.createTextNode(fmtMoney(item.cpi))]),
+          el("td", {}, [document.createTextNode(fmtMoney(item.targetCost))]),
         ]),
       ),
     );
@@ -3182,6 +3224,7 @@ function render() {
   renderSpecialPurchaseSummary();
   renderPins();
   renderStageMode();
+  renderProductMomentumMode();
   renderKpis(rows, comparisonRows);
   renderInsights(rows, comparisonRows);
   renderAlerts(comparisonRows);
@@ -3261,6 +3304,12 @@ async function init() {
         saveStageMode();
         renderStageMode();
         requestAnimationFrame(replayChartAnimations);
+      });
+    });
+    document.querySelectorAll("[data-momentum-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.productMomentumMode = button.dataset.momentumMode;
+        render();
       });
     });
     document.querySelector("#applyDateRange").addEventListener("click", applyRangeFromControls);

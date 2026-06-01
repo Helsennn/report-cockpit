@@ -331,7 +331,11 @@
             <div class="panel-head">
               <div>
                 <h3>Product Momentum</h3>
-                <p>Product GMV this week vs prior week, sized by orders.</p>
+                <p id="productMomentumCopy">Product GMV this week vs prior week, sized by orders.</p>
+              </div>
+              <div class="momentum-switch" role="group" aria-label="Product momentum comparison mode">
+                <button type="button" data-momentum-mode="week">Week</button>
+                <button type="button" data-momentum-mode="day">Day</button>
               </div>
             </div>
             <div class="chart" id="productMomentumChart" role="img" aria-label="Product momentum bubble chart"></div>
@@ -384,7 +388,7 @@
               <button id="resetFilters" type="button">Reset</button>
             </div>
             <div class="table-wrap">
-              <table>
+              <table class="product-leaders-table">
                 <thead>
                   <tr>
                     <th><button class="sort-button" type="button" data-sort="product">Product</button></th>
@@ -392,6 +396,8 @@
                     <th><button class="sort-button" type="button" data-sort="orders">Orders</button></th>
                     <th><button class="sort-button" type="button" data-sort="buyers">Buyers</button></th>
                     <th><button class="sort-button" type="button" data-sort="aov">AOV</button></th>
+                    <th><button class="sort-button" type="button" data-sort="cpi">CPI</button></th>
+                    <th><button class="sort-button" type="button" data-sort="targetCost">Est. Cost</button></th>
                   </tr>
                 </thead>
                 <tbody id="productTable"></tbody>
