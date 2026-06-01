@@ -2,6 +2,7 @@ const state = {
   data: null,
   baseData: null,
   uploadedRows: [],
+  uploadedWeekHours: {},
   uploadedReplaceDates: true,
   specialRuleMode: "exclude",
   specialRulesText: "",
@@ -470,6 +471,35 @@ function parseNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function hashText(value) {
+  let hash = 2166136261;
+  const text = String(value || "").toLowerCase().trim();
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function rowOrders(row) {
+  return Number(row.order_count || row.orders || 1);
+}
+
+function rowGmv(row) {
+  return Number(row.price || row.gmv || 0);
+}
+
+function rowBuyer(row) {
+  return row.buyer || row.buyer_key || "";
+}
+
+function buyerMatchKeys(row) {
+  const buyer = rowBuyer(row);
+  if (!buyer) return [];
+  const anon = buyer.startsWith("anon_") ? buyer : `anon_${hashText(buyer)}`;
+  return buyer === anon ? [buyer] : [buyer, anon];
+}
+
 function parseDateValue(value) {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -660,6 +690,68 @@ function estimateStreamHoursFromRows(rows) {
   }, 0);
 }
 
+function uploadedOrdersCount(rows = state.uploadedRows) {
+  return rows.reduce((sum, row) => sum + rowOrders(row), 0);
+}
+
+function uploadedWeeksCount(rows = state.uploadedRows) {
+  return new Set(rows.map((row) => row.week)).size;
+}
+
+function uploadedDatesCount(rows = state.uploadedRows) {
+  return new Set(rows.map((row) => row.broadcast_date || row.date)).size;
+}
+
+function rollupUploadedRows(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const buyer = rowBuyer(row);
+    const anonBuyer = buyer.startsWith("anon_") ? buyer : `anon_${hashText(buyer)}`;
+    const key = [
+      row.week,
+      row.week_start || "",
+      row.week_end || "",
+      row.broadcast_date || row.date || "",
+      row.date || row.broadcast_date || "",
+      anonBuyer,
+      row.product,
+      row.price_band,
+      row.buyer_type,
+    ].join("||");
+    if (!map.has(key)) {
+      map.set(key, {
+        week: row.week,
+        week_start: row.week_start,
+        week_end: row.week_end,
+        date: row.date || row.broadcast_date,
+        broadcast_date: row.broadcast_date || row.date,
+        buyer: anonBuyer,
+        product: row.product,
+        price: 0,
+        target_price: row.target_price || 0,
+        price_band: row.price_band,
+        buyer_type: row.buyer_type,
+        order_count: 0,
+        source: "csv_rollup",
+      });
+    }
+    const item = map.get(key);
+    item.price += rowGmv(row);
+    item.order_count += rowOrders(row);
+  });
+  return [...map.values()].map((row) => ({ ...row, price: Number(row.price.toFixed(2)) }));
+}
+
+function weekHoursFromRows(rows) {
+  const map = {};
+  new Set(rows.map((row) => row.week)).forEach((week) => {
+    const weekRows = rows.filter((row) => row.week === week);
+    const estimated = estimateStreamHoursFromRows(weekRows);
+    if (estimated) map[week] = Number(estimated.toFixed(2));
+  });
+  return map;
+}
+
 function buildWeeks(baseData, records) {
   const weeks = new Map((baseData.weeks || []).map((week) => [week.label, { ...week }]));
   records.forEach((row) => {
@@ -678,22 +770,23 @@ function applyBuyerTypes(records, weeks) {
   const basePriorBuyers = new Set(
     (state.baseData?.records || [])
       .filter((row) => row.buyer_type === "returning")
-      .map((row) => row.buyer)
-      .filter(Boolean),
+      .flatMap(buyerMatchKeys),
   );
   const buyersByEarlierWeek = new Map();
   weeks.forEach((week) => {
     buyersByEarlierWeek.set(week.label, new Set(basePriorBuyers));
     records.forEach((row) => {
       const rowStart = weekStarts.get(row.week);
-      if (row.buyer && rowStart && rowStart < week.start) buyersByEarlierWeek.get(week.label).add(row.buyer);
+      if (rowStart && rowStart < week.start) {
+        buyerMatchKeys(row).forEach((key) => buyersByEarlierWeek.get(week.label).add(key));
+      }
     });
   });
 
   records.forEach((row) => {
     if (row.source !== "csv_upload") return;
     const prior = buyersByEarlierWeek.get(row.week);
-    row.buyer_type = prior?.has(row.buyer) ? "returning" : "new";
+    row.buyer_type = buyerMatchKeys(row).some((key) => prior?.has(key)) ? "returning" : "new";
   });
 }
 
@@ -701,6 +794,7 @@ function rebuildDataWithUploads() {
   const baseData = cloneData(state.baseData);
   const uploadedWeeks = new Set(state.uploadedRows.map((row) => row.week));
   const uploadedDates = new Set(state.uploadedRows.map((row) => row.broadcast_date || row.date));
+  const uploadedOrderCount = uploadedOrdersCount();
   const baseRecords = state.uploadedReplaceDates
     ? baseData.records.filter((row) => !uploadedDates.has(row.broadcast_date || row.date))
     : baseData.records.slice();
@@ -717,8 +811,10 @@ function rebuildDataWithUploads() {
     const typed = aggregateRowsByType(wr);
     const newType = typed.find((item) => item.buyerType === "new");
     const returningType = typed.find((item) => item.buyerType === "returning");
-    const uploadedInWeek = wr.some((row) => row.source === "csv_upload");
-    const streamHours = uploadedInWeek ? estimateStreamHoursFromRows(wr) : (oldWeekly.get(week.label)?.stream_hours || 0);
+    const uploadedInWeek = wr.some((row) => row.source === "csv_upload" || row.source === "csv_rollup");
+    const streamHours = uploadedInWeek
+      ? (state.uploadedWeekHours[week.label] || estimateStreamHoursFromRows(wr))
+      : (oldWeekly.get(week.label)?.stream_hours || 0);
 
     return {
       week: week.label,
@@ -761,7 +857,7 @@ function rebuildDataWithUploads() {
   return {
     ...baseData,
     generated_at: new Date().toLocaleString(),
-    source_note: `${baseData.source_note} CSV upload override is active: ${state.uploadedRows.length.toLocaleString()} rows across ${uploadedWeeks.size} week(s) and ${uploadedDates.size} date(s); ${state.uploadedReplaceDates ? "matching dates replaced" : "rows appended"}.`,
+    source_note: `${baseData.source_note} CSV upload override is active: ${uploadedOrderCount.toLocaleString()} paid orders summarized across ${uploadedWeeks.size} week(s) and ${uploadedDates.size} date(s); ${state.uploadedReplaceDates ? "matching dates replaced" : "rows appended"}. Raw CSV rows are not stored in browser history.`,
     weeks,
     weekly,
     latest_week: latestWeek,
@@ -798,9 +894,12 @@ function saveUploads() {
       localStorage.removeItem(uploadStorageKey);
       return;
     }
-      localStorage.setItem(uploadStorageKey, JSON.stringify({
+    const rollupRows = rollupUploadedRows(state.uploadedRows);
+    localStorage.setItem(uploadStorageKey, JSON.stringify({
+      version: 2,
       replaceDates: state.uploadedReplaceDates,
-      rows: state.uploadedRows,
+      weekHours: state.uploadedWeekHours,
+      rows: rollupRows,
     }));
   } catch {
     updateUploadStatus("CSV loaded, but browser storage is full. It will reset after refresh.");
@@ -811,10 +910,13 @@ function loadUploads() {
   try {
     const saved = JSON.parse(localStorage.getItem(uploadStorageKey) || "null");
     if (!saved?.rows?.length) return;
-    state.uploadedRows = saved.rows;
+    const restoredRows = saved.version === 2 ? saved.rows : rollupUploadedRows(saved.rows);
+    state.uploadedRows = restoredRows;
+    state.uploadedWeekHours = saved.weekHours || (saved.version === 2 ? {} : weekHoursFromRows(saved.rows));
     state.uploadedReplaceDates = saved.replaceDates ?? saved.replaceWeeks ?? true;
     document.querySelector("#replaceDatesToggle").checked = state.uploadedReplaceDates;
-    updateUploadStatus(`${state.uploadedRows.length.toLocaleString()} uploaded rows restored from this browser.`);
+    updateUploadStatus(`${uploadedOrdersCount().toLocaleString()} summarized uploaded orders restored from this browser. Raw CSV rows are not stored.`);
+    if (saved.version !== 2) saveUploads();
   } catch {
     localStorage.removeItem(uploadStorageKey);
   }
@@ -847,14 +949,20 @@ async function handleCsvUpload(files) {
   }
 
   const beforeCount = state.uploadedRows.length;
-  state.uploadedRows = dedupeUploadedRows([...state.uploadedRows, ...parsedRows]);
   state.uploadedReplaceDates = document.querySelector("#replaceDatesToggle").checked;
+  const parsedDates = new Set(parsedRows.map((row) => row.broadcast_date || row.date));
+  const retainedRows = state.uploadedReplaceDates
+    ? state.uploadedRows.filter((row) => !parsedDates.has(row.broadcast_date || row.date))
+    : state.uploadedRows;
+  state.uploadedRows = dedupeUploadedRows([...retainedRows, ...parsedRows]);
+  state.uploadedWeekHours = {
+    ...state.uploadedWeekHours,
+    ...weekHoursFromRows(parsedRows),
+  };
   saveUploads();
-  const weeks = new Set(state.uploadedRows.map((row) => row.week));
-  const dates = new Set(state.uploadedRows.map((row) => row.broadcast_date || row.date));
   const added = state.uploadedRows.length - beforeCount;
   const replaced = parsedRows.length - added;
-  updateUploadStatus(`${state.uploadedRows.length.toLocaleString()} uploaded rows active across ${weeks.size} week(s), ${dates.size} date(s).${replaced > 0 ? ` ${replaced.toLocaleString()} duplicate/corrected rows merged.` : ""}`);
+  updateUploadStatus(`${uploadedOrdersCount().toLocaleString()} uploaded paid orders active across ${uploadedWeeksCount()} week(s), ${uploadedDatesCount()} date(s). Browser history stores only summarized anonymous rows.${replaced > 0 ? ` ${replaced.toLocaleString()} duplicate/corrected rows merged.` : ""}`);
   refreshDataAfterUpload();
 }
 
@@ -881,22 +989,25 @@ function getCurrentRows() {
 }
 
 function aggregateRows(rows) {
-  const buyers = new Set(rows.map((row) => row.buyer).filter(Boolean));
+  const buyers = new Set(rows.map(rowBuyer).filter(Boolean));
   const buyerOrders = new Map();
   let gmv = 0;
 
   rows.forEach((row) => {
-    gmv += row.price;
-    if (row.buyer) buyerOrders.set(row.buyer, (buyerOrders.get(row.buyer) || 0) + 1);
+    const orders = rowOrders(row);
+    const buyer = rowBuyer(row);
+    gmv += rowGmv(row);
+    if (buyer) buyerOrders.set(buyer, (buyerOrders.get(buyer) || 0) + orders);
   });
 
   const repeatBuyers = [...buyerOrders.values()].filter((count) => count >= 2).length;
+  const orders = rows.reduce((sum, row) => sum + rowOrders(row), 0);
   return {
     gmv,
-    orders: rows.length,
+    orders,
     buyers: buyers.size,
-    aov: rows.length ? gmv / rows.length : 0,
-    ordersPerBuyer: buyers.size ? rows.length / buyers.size : 0,
+    aov: orders ? gmv / orders : 0,
+    ordersPerBuyer: buyers.size ? orders / buyers.size : 0,
     repeatRate: buyers.size ? (repeatBuyers / buyers.size) * 100 : 0,
   };
 }
@@ -910,9 +1021,9 @@ function aggregateRowsByType(rows) {
   rows.forEach((row) => {
     const item = byType.get(row.buyer_type);
     if (!item) return;
-    item.gmv += row.price;
-    item.orders += 1;
-    if (row.buyer) item.buyers.add(row.buyer);
+    item.gmv += rowGmv(row);
+    item.orders += rowOrders(row);
+    if (rowBuyer(row)) item.buyers.add(rowBuyer(row));
   });
 
   return [...byType.values()].map((item) => ({
@@ -930,9 +1041,9 @@ function summarizePriceBandsFromRows(rows) {
   rows.forEach((row) => {
     const item = map.get(row.price_band);
     if (!item) return;
-    item.gmv += row.price;
-    item.orders += 1;
-    if (row.buyer) item.buyers.add(row.buyer);
+    item.gmv += rowGmv(row);
+    item.orders += rowOrders(row);
+    if (rowBuyer(row)) item.buyers.add(rowBuyer(row));
   });
   return [...map.values()].map((item) => ({
     band: item.band,
@@ -955,9 +1066,9 @@ function groupWeeklyPriceBands(rows) {
     if (!weekMap) return;
     const item = weekMap.get(row.price_band);
     if (!item) return;
-    item.gmv += row.price;
-    item.orders += 1;
-    if (row.buyer) item.buyers.add(row.buyer);
+    item.gmv += rowGmv(row);
+    item.orders += rowOrders(row);
+    if (rowBuyer(row)) item.buyers.add(rowBuyer(row));
   });
 
   return weeks.map((week) => {
@@ -1003,9 +1114,9 @@ function aggregateProducts(rows) {
       map.set(row.product, { product: row.product, gmv: 0, orders: 0, buyers: new Set() });
     }
     const item = map.get(row.product);
-    item.gmv += row.price;
-    item.orders += 1;
-    if (row.buyer) item.buyers.add(row.buyer);
+    item.gmv += rowGmv(row);
+    item.orders += rowOrders(row);
+    if (rowBuyer(row)) item.buyers.add(rowBuyer(row));
   });
 
   return [...map.values()].map((item) => ({
@@ -1039,9 +1150,9 @@ function groupedProducts(rows) {
       map.set(row.product, { product: row.product, gmv: 0, orders: 0, buyers: new Set() });
     }
     const item = map.get(row.product);
-    item.gmv += row.price;
-    item.orders += 1;
-    if (row.buyer) item.buyers.add(row.buyer);
+    item.gmv += rowGmv(row);
+    item.orders += rowOrders(row);
+    if (rowBuyer(row)) item.buyers.add(rowBuyer(row));
   });
 
   return [...map.values()].map((item) => ({
@@ -1150,7 +1261,7 @@ function focusWeekContext(comparisonRows) {
     prevLabel = state.data.weekly[index - 1].week;
     prevGmv = comparisonRows
       .filter((row) => row.week === prevLabel)
-      .reduce((sum, row) => sum + row.price, 0);
+      .reduce((sum, row) => sum + rowGmv(row), 0);
     wowPct = prevGmv ? ((focusMetrics.gmv - prevGmv) / prevGmv) * 100 : null;
   } else if (isUnfilteredView() && meta) {
     prevLabel = state.data.baseline_week?.label || "prior week";
@@ -1400,6 +1511,23 @@ function renderSpecialPurchaseSummary() {
   const host = document.querySelector("#specialSummary");
   const button = document.querySelector("#viewSpecialBuys");
   if (!host || !button) return;
+
+  if (state.specialRuleMode === "all") {
+    button.disabled = true;
+    host.replaceChildren(
+      el("p", { class: "special-mode-note all" }, [document.createTextNode("Special buy rules are off in Include all mode.")]),
+      el("p", {}, [document.createTextNode("Switch to Exclude or Only include when you want these keywords to affect the dashboard.")]),
+    );
+    return;
+  }
+
+  if (!parsedSpecialRules().length) {
+    button.disabled = true;
+    host.replaceChildren(
+      el("p", { class: "special-mode-note" }, [document.createTextNode("Add one or more rules to preview matched products.")]),
+    );
+    return;
+  }
 
   const rows = specialPurchaseRowsForCurrentScope();
   const summary = summarizeSpecialPurchases(rows);
@@ -2430,9 +2558,9 @@ function drawWeekdayHeatmap(rows) {
     if (!weekly) return;
     const dayIndex = localWeekdayIndex(row.broadcast_date || row.date);
     const item = weekly[dayIndex];
-    item.gmv += row.price;
-    item.orders += 1;
-    if (row.buyer) item.buyers.add(row.buyer);
+    item.gmv += rowGmv(row);
+    item.orders += rowOrders(row);
+    if (rowBuyer(row)) item.buyers.add(rowBuyer(row));
   });
 
   const cells = [...map.values()].flat().map((item) => ({ ...item, buyers: item.buyers.size }));
@@ -2686,6 +2814,7 @@ async function init() {
     });
     document.querySelector("#clearUploads").addEventListener("click", () => {
       state.uploadedRows = [];
+      state.uploadedWeekHours = {};
       saveUploads();
       updateUploadStatus("CSV override cleared. Showing generated SQL/Drive data.");
       refreshDataAfterUpload();
