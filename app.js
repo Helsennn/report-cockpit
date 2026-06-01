@@ -1152,12 +1152,12 @@ function datesForWeek(label = focusWeekLabel()) {
 }
 
 function pruneSelectedDates() {
-  const valid = new Set(datesForWeek());
+  const valid = new Set(selectableInWeekDates());
   state.selectedDates = state.selectedDates.filter((date) => valid.has(date));
 }
 
 function activeInWeekDates() {
-  return state.selectedDates.length ? state.selectedDates : datesForWeek();
+  return state.selectedDates.length ? state.selectedDates : selectableInWeekDates();
 }
 
 function baseRowsForWeek(label = focusWeekLabel(), options = {}) {
@@ -2680,7 +2680,18 @@ function dailyRowsForFocusedWeek(rows, dates = activeInWeekDates()) {
   });
 }
 
-function selectedRangeBounds(dates = datesForWeek()) {
+function datesWithActivity(rows, dates = datesForWeek()) {
+  const activeDates = dailyRowsForFocusedWeek(rows, dates)
+    .filter((day) => day.orders > 0 || day.gmv > 0 || day.buyers > 0)
+    .map((day) => day.date);
+  return activeDates.length ? activeDates : dates;
+}
+
+function selectableInWeekDates() {
+  return datesWithActivity(baseRowsForWeek(), datesForWeek());
+}
+
+function selectedRangeBounds(dates = selectableInWeekDates()) {
   const selected = state.selectedDates.length ? state.selectedDates.filter((date) => dates.includes(date)) : dates;
   return {
     start: selected[0] || dates[0],
@@ -2689,7 +2700,7 @@ function selectedRangeBounds(dates = datesForWeek()) {
 }
 
 function datesBetweenControls(start, end) {
-  const dates = datesForWeek();
+  const dates = selectableInWeekDates();
   const startIndex = dates.indexOf(start);
   const endIndex = dates.indexOf(end);
   if (startIndex < 0 || endIndex < 0) return dates;
@@ -2702,7 +2713,7 @@ function renderRangeControls() {
   const startSelect = document.querySelector("#rangeStart");
   const endSelect = document.querySelector("#rangeEnd");
   if (!startSelect || !endSelect) return;
-  const dates = datesForWeek();
+  const dates = selectableInWeekDates();
   const { start, end } = selectedRangeBounds(dates);
   const options = dates.map((date) => el("option", { value: date }, [document.createTextNode(shortDateLabel(date))]));
   startSelect.replaceChildren(...options.map((option) => option.cloneNode(true)));
@@ -2751,12 +2762,13 @@ function renderDaySelector(rows) {
 
   pruneSelectedDates();
   const selected = new Set(state.selectedDates);
-  const daily = dailyRowsForFocusedWeek(rows, datesForWeek());
+  const availableDates = datesWithActivity(rows, datesForWeek());
+  const daily = dailyRowsForFocusedWeek(rows, availableDates);
   document.querySelector("#inWeekEyebrow").textContent = `${focusWeekLabel()} · ${state.selectedDates.length ? `${state.selectedDates.length} selected day(s)` : "full week"}`;
   clear.setAttribute("aria-pressed", state.selectedDates.length ? "false" : "true");
   note.textContent = state.selectedDates.length
     ? `Showing ${state.selectedDates.map(shortDateLabel).join(", ")} only.`
-    : "No day selected means the full focused week.";
+    : `Showing ${availableDates.length} active selling day(s); no-data days are hidden from the range charts.`;
 
   host.replaceChildren(
     ...daily.map((day) => {
@@ -2899,7 +2911,7 @@ function drawDailyBuyerMix(rows) {
 }
 
 function drawDailyAovFrequency(rows) {
-  const svg = chartScaffold("#dailyAovFreqChart", "0 0 940 430", "Daily AOV and order frequency");
+  const svg = chartScaffold("#dailyAovFreqChart", "0 0 940 470", "Daily AOV and order frequency");
   const daily = dailyRowsForFocusedWeek(rows);
   const left = 92;
   const width = 760;
@@ -2944,7 +2956,7 @@ function drawDailyAovFrequency(rows) {
   drawLegend(svg, [
     { label: "AOV", color: "#dc5b42", width: 82 },
     { label: "Orders / buyer", color: "#5c8a4b", width: 142 },
-  ], left, 382, 760);
+  ], left, 430, 760);
   const aovLabel = svgEl("text", { x: left, y: aovTop - 18, class: "chart-title-note" });
   aovLabel.textContent = "AOV ($ / order)";
   svg.append(aovLabel);
