@@ -2012,9 +2012,9 @@ function drawWeeklyGmv(rows) {
 function drawBarChart(target, rows, key, valueKey, color = "#f97316", formatter = fmtMoney, label = "") {
   const svg = chartScaffold(target, "0 0 940 390", label);
   const left = 92;
-  const top = 38;
+  const top = 64;
   const width = 760;
-  const height = 260;
+  const height = 232;
   const max = Math.max(...rows.map((d) => d[valueKey]), 1);
   drawGrid(svg, left, top, width, height, 4, max, formatter);
   const barW = width / rows.length - 20;
@@ -2479,12 +2479,13 @@ function drawWaterfallChart(comparisonRows) {
     label.textContent = item.label;
     svg.append(label);
 
-    const value = svgEl("text", { x: x + barW / 2, y: Math.max(y - 12, top + 16), "text-anchor": "middle", class: "axis-label" });
+    const valueY = Math.max(y - 12 - (index % 2 ? 0 : 8), top + 18 + (index % 2 ? 12 : 0));
+    const value = svgEl("text", { x: x + barW / 2, y: valueY, "text-anchor": "middle", class: "axis-label" });
     value.textContent = item.type === "delta" ? fmtMoney(item.value) : fmtShort(item.value);
     svg.append(value);
   });
 
-  const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
+  const note = svgEl("text", { x: left + width, y: 30, "text-anchor": "end", class: "chart-title-note" });
   note.textContent = `${focus.label} vs ${focus.prevLabel}`;
   svg.append(note);
 }
@@ -3205,12 +3206,22 @@ function setProductSelected(product, isSelected) {
   if (isSelected) current.add(product);
   else current.delete(product);
   state.selectedProducts = [...current];
-  render();
+  renderPreservingViewport();
 }
 
 function clearProductSelection() {
   state.selectedProducts = [];
+  renderPreservingViewport();
+}
+
+function renderPreservingViewport() {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
   render();
+  requestAnimationFrame(() => {
+    window.scrollTo(scrollX, scrollY);
+    requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+  });
 }
 
 function renderTable(rows) {
