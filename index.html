@@ -138,22 +138,54 @@
         <section class="inweek-section" aria-label="In-week selected day analysis">
           <div class="section-head">
             <div>
-              <p class="eyebrow" id="inWeekEyebrow">Selected week</p>
-              <h3>In-week / Selected Days</h3>
+              <p class="eyebrow" id="inWeekEyebrow">Selected date layer</p>
+              <h3>Selected Date Range Layer</h3>
             </div>
             <button id="clearDaySelection" type="button">All days</button>
           </div>
+          <div class="range-toolbar" aria-label="Selected date range controls">
+            <label>
+              <span>From</span>
+              <select id="rangeStart"></select>
+            </label>
+            <label>
+              <span>To</span>
+              <select id="rangeEnd"></select>
+            </label>
+            <button id="applyDateRange" type="button">Apply range</button>
+          </div>
           <div class="day-chip-row" id="dayChipRow" aria-label="Select days inside the focused week"></div>
           <p class="field-hint" id="daySelectionNote">No day selected means the full focused week.</p>
+          <div class="range-summary-grid" id="rangeSummary" aria-label="Selected date range summary"></div>
           <div class="chart-grid inweek-grid">
             <article class="panel wide">
               <div class="panel-head">
                 <div>
-                  <h3>Daily GMV, Orders & Buyers</h3>
-                  <p>Bars show GMV; lines show orders and buyer count for the selected days.</p>
+                  <h3>Selected Range Daily Trend</h3>
+                  <p>Bars show GMV; lines show order and buyer movement inside the chosen range.</p>
                 </div>
               </div>
               <div class="chart" id="dailyTrendChart" role="img" aria-label="Daily GMV orders and buyers chart"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Daily New vs Returning</h3>
+                  <p>GMV mix by buyer type for each selected day.</p>
+                </div>
+              </div>
+              <div class="chart" id="dailyBuyerMixChart" role="img" aria-label="Daily new versus returning buyer mix chart"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Daily AOV + Frequency</h3>
+                  <p>Order value and orders per buyer across selected days.</p>
+                </div>
+              </div>
+              <div class="chart" id="dailyAovFreqChart" role="img" aria-label="Daily AOV and frequency chart"></div>
             </article>
 
             <article class="panel">
@@ -169,8 +201,8 @@
             <article class="panel">
               <div class="panel-head">
                 <div>
-                  <h3>Selected Days Product Leaders</h3>
-                  <p>Top products only for the days selected above.</p>
+                  <h3>Selected Range Product Leaders</h3>
+                  <p>Top products only for the chosen date range.</p>
                 </div>
               </div>
               <div class="chart" id="dailyProductLeadersChart" role="img" aria-label="Selected days product leaders chart"></div>

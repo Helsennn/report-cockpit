@@ -2680,6 +2680,69 @@ function dailyRowsForFocusedWeek(rows, dates = activeInWeekDates()) {
   });
 }
 
+function selectedRangeBounds(dates = datesForWeek()) {
+  const selected = state.selectedDates.length ? state.selectedDates.filter((date) => dates.includes(date)) : dates;
+  return {
+    start: selected[0] || dates[0],
+    end: selected[selected.length - 1] || dates[dates.length - 1],
+  };
+}
+
+function datesBetweenControls(start, end) {
+  const dates = datesForWeek();
+  const startIndex = dates.indexOf(start);
+  const endIndex = dates.indexOf(end);
+  if (startIndex < 0 || endIndex < 0) return dates;
+  const from = Math.min(startIndex, endIndex);
+  const to = Math.max(startIndex, endIndex);
+  return dates.slice(from, to + 1);
+}
+
+function renderRangeControls() {
+  const startSelect = document.querySelector("#rangeStart");
+  const endSelect = document.querySelector("#rangeEnd");
+  if (!startSelect || !endSelect) return;
+  const dates = datesForWeek();
+  const { start, end } = selectedRangeBounds(dates);
+  const options = dates.map((date) => el("option", { value: date }, [document.createTextNode(shortDateLabel(date))]));
+  startSelect.replaceChildren(...options.map((option) => option.cloneNode(true)));
+  endSelect.replaceChildren(...options.map((option) => option.cloneNode(true)));
+  startSelect.value = start;
+  endSelect.value = end;
+}
+
+function applyRangeFromControls() {
+  const start = document.querySelector("#rangeStart")?.value;
+  const end = document.querySelector("#rangeEnd")?.value;
+  if (!start || !end) return;
+  state.selectedDates = datesBetweenControls(start, end);
+  render();
+}
+
+function renderRangeSummary(rows) {
+  const host = document.querySelector("#rangeSummary");
+  if (!host) return;
+  const metrics = aggregateRows(rows);
+  const days = activeInWeekDates();
+  const label = days.length === 1
+    ? shortDateLabel(days[0])
+    : `${shortDateLabel(days[0])} to ${shortDateLabel(days[days.length - 1])}`;
+  const cards = [
+    ["Range GMV", fmtMoney(metrics.gmv), label],
+    ["Orders", fmtNum(metrics.orders), `${metrics.ordersPerBuyer.toFixed(2)} orders / buyer`],
+    ["Buyer Count", fmtNum(metrics.buyers), `${metrics.repeatRate.toFixed(1)}% repeat rate`],
+    ["AOV", fmtMoney(metrics.aov), "Average sold price"],
+    ["Days selected", fmtNum(days.length), state.selectedDates.length ? "Custom date layer" : "Full focused week"],
+  ];
+  host.replaceChildren(...cards.map(([title, value, detail]) =>
+    el("article", { class: "range-summary-card" }, [
+      el("span", {}, [document.createTextNode(title)]),
+      el("strong", {}, [document.createTextNode(value)]),
+      el("em", {}, [document.createTextNode(detail)]),
+    ]),
+  ));
+}
+
 function renderDaySelector(rows) {
   const host = document.querySelector("#dayChipRow");
   const note = document.querySelector("#daySelectionNote");
@@ -2793,6 +2856,103 @@ function drawDailyTrend(rows) {
   svg.append(note);
 }
 
+function drawDailyBuyerMix(rows) {
+  const svg = chartScaffold("#dailyBuyerMixChart", "0 0 940 430", "Daily new versus returning GMV mix");
+  const dates = activeInWeekDates();
+  const data = dates.map((date) => {
+    const dayRows = rows.filter((row) => (row.broadcast_date || row.date) === date);
+    const types = aggregateRowsByType(dayRows);
+    const total = types.reduce((sum, type) => sum + type.gmv, 0);
+    return { date, label: shortDateLabel(date), total, types };
+  });
+  const left = 92;
+  const top = 44;
+  const width = 760;
+  const height = 260;
+  drawGrid(svg, left, top, width, height, 4, 100, (value) => `${value.toFixed(0)}%`);
+  const columnW = Math.min(72, width / data.length - 18);
+  data.forEach((day, index) => {
+    const x = left + (width * (index + 0.5)) / data.length - columnW / 2;
+    let yCursor = top + height;
+    day.types.forEach((type) => {
+      const pct = day.total ? (type.gmv / day.total) * 100 : 0;
+      const h = (pct / 100) * height;
+      if (h <= 0) return;
+      yCursor -= h;
+      const color = type.buyerType === "new" ? "#f97316" : "#9a5a2e";
+      const rect = svgEl("rect", { x, y: yCursor, width: columnW, height: h, rx: h > 15 ? 8 : 3, fill: color });
+      animateRect(rect);
+      attachTooltip(rect, `<strong>${escapeHtml(day.label)} ${escapeHtml(type.buyerType)}</strong><br>${pct.toFixed(1)}% of GMV<br>GMV ${fmtMoney(type.gmv)}<br>Orders ${fmtNum(type.orders)}<br>Buyers ${fmtNum(type.buyers)}`);
+      attachChartAction(rect, `${day.label} ${type.buyerType}`, () => {
+        openCriteriaDrilldown({ title: `${day.label} ${type.buyerType}`, kicker: "Selected day buyer mix", criteria: { week: focusWeekLabel(), date: day.date, buyerType: type.buyerType } });
+      });
+      svg.append(rect);
+    });
+    const label = svgEl("text", { x: x + columnW / 2, y: top + height + 31, "text-anchor": "middle", class: "axis-label" });
+    label.textContent = day.label;
+    svg.append(label);
+  });
+  drawLegend(svg, [
+    { label: "New GMV", color: "#f97316", width: 108 },
+    { label: "Returning GMV", color: "#9a5a2e", width: 154 },
+  ], left, 382, 760);
+}
+
+function drawDailyAovFrequency(rows) {
+  const svg = chartScaffold("#dailyAovFreqChart", "0 0 940 430", "Daily AOV and order frequency");
+  const daily = dailyRowsForFocusedWeek(rows);
+  const left = 92;
+  const width = 760;
+  const aovTop = 52;
+  const freqTop = 238;
+  const sectionH = 116;
+  const maxAov = Math.ceil(Math.max(...daily.map((day) => day.aov), 1) / 5) * 5 || 5;
+  const maxFreq = Math.ceil(Math.max(...daily.map((day) => day.ordersPerBuyer), 1) / 0.5) * 0.5 || 1;
+  drawGrid(svg, left, aovTop, width, sectionH, 3, maxAov, fmtMoney);
+  drawGrid(svg, left, freqTop, width, sectionH, 3, maxFreq, (value) => value.toFixed(1));
+
+  const slotW = width / daily.length;
+  const aovPoints = [];
+  const freqPoints = [];
+  daily.forEach((day, index) => {
+    const x = left + slotW * (index + 0.5);
+    aovPoints.push([x, aovTop + sectionH - (day.aov / maxAov) * sectionH, day]);
+    freqPoints.push([x, freqTop + sectionH - (day.ordersPerBuyer / maxFreq) * sectionH, day]);
+    const label = svgEl("text", { x, y: freqTop + sectionH + 31, "text-anchor": "middle", class: "axis-label" });
+    label.textContent = day.label;
+    svg.append(label);
+  });
+
+  const drawLine = (points, color, label, field, formatter, dashed = false) => {
+    const lineD = pathFromPoints(points);
+    svg.append(animatedPath({
+      d: lineD,
+      fill: "none",
+      stroke: color,
+      "stroke-width": 4,
+      "stroke-linecap": "round",
+      "stroke-dasharray": dashed ? "7 7" : "none",
+    }));
+    points.forEach(([x, y, day]) => {
+      const dot = animatedDot({ cx: x, cy: y, r: 5.5, fill: color, stroke: "#fffaf4", "stroke-width": 2 });
+      attachTooltip(dot, `<strong>${escapeHtml(day.label)} ${escapeHtml(label)}</strong><br>${formatter(day[field])}<br>GMV ${fmtMoney(day.gmv)}<br>Orders ${fmtNum(day.orders)}<br>Buyers ${fmtNum(day.buyers)}`);
+      svg.append(dot);
+    });
+  };
+  drawLine(aovPoints, "#dc5b42", "AOV", "aov", fmtMoney);
+  drawLine(freqPoints, "#5c8a4b", "Frequency", "ordersPerBuyer", (value) => value.toFixed(2), true);
+  drawLegend(svg, [
+    { label: "AOV", color: "#dc5b42", width: 82 },
+    { label: "Orders / buyer", color: "#5c8a4b", width: 142 },
+  ], left, 382, 760);
+  const aovLabel = svgEl("text", { x: left, y: aovTop - 18, class: "chart-title-note" });
+  aovLabel.textContent = "AOV ($ / order)";
+  svg.append(aovLabel);
+  const freqLabel = svgEl("text", { x: left, y: freqTop - 18, class: "chart-title-note" });
+  freqLabel.textContent = "Frequency (orders / buyer)";
+  svg.append(freqLabel);
+}
+
 function drawDailyCpiMix(rows) {
   const svg = chartScaffold("#dailyCpiMixChart", "0 0 940 430", "Daily CPI band GMV mix for selected week");
   const dates = activeInWeekDates();
@@ -2874,9 +3034,13 @@ function drawSelectedDayProductLeaders(rows) {
 
 function renderInWeekAnalysis() {
   const weekRows = baseRowsForWeek();
+  renderRangeControls();
   renderDaySelector(weekRows);
   const rows = inWeekRows();
+  renderRangeSummary(rows);
   drawDailyTrend(rows);
+  drawDailyBuyerMix(rows);
+  drawDailyAovFrequency(rows);
   drawDailyCpiMix(rows);
   drawSelectedDayProductLeaders(rows);
 }
@@ -3043,6 +3207,9 @@ async function init() {
       state.selectedDates = [];
       render();
     });
+    document.querySelector("#applyDateRange").addEventListener("click", applyRangeFromControls);
+    document.querySelector("#rangeStart").addEventListener("change", applyRangeFromControls);
+    document.querySelector("#rangeEnd").addEventListener("change", applyRangeFromControls);
     document.querySelector("#productSearch").addEventListener("input", debounce((event) => {
       state.query = event.target.value.trim().toLowerCase();
       render();

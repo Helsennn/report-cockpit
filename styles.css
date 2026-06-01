@@ -934,6 +934,34 @@ button {
   box-shadow: inset 0 0 0 1px #efc6a5;
 }
 
+.range-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin: 6px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.54);
+  padding: 12px;
+}
+
+.range-toolbar label {
+  display: grid;
+  gap: 6px;
+}
+
+.range-toolbar span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.range-toolbar button,
+.range-toolbar select {
+  min-height: 44px;
+}
+
 .day-chip-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
@@ -979,6 +1007,47 @@ button {
 }
 
 .day-chip em {
+  color: var(--brown);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.range-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(142px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.range-summary-card {
+  min-height: 92px;
+  border: 1px solid #ead8c6;
+  border-radius: 15px;
+  background: rgba(255, 250, 244, 0.9);
+  padding: 12px;
+  box-shadow: 0 8px 18px rgba(84, 50, 22, 0.05);
+}
+
+.range-summary-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.range-summary-card strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--ink);
+  font-size: 24px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.range-summary-card em {
+  display: block;
+  margin-top: 6px;
   color: var(--brown);
   font-size: 12px;
   font-style: normal;
@@ -1529,6 +1598,10 @@ th {
 }
 
 @media (max-width: 680px) {
+  .range-toolbar {
+    grid-template-columns: 1fr;
+  }
+
   .topbar {
     align-items: flex-start;
     flex-direction: column;
