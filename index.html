@@ -58,8 +58,8 @@
 
           <section class="control-group special-rules-group">
             <label for="specialRulesInput">Special buy rules</label>
-            <textarea id="specialRulesInput" rows="3" spellcheck="false" placeholder="530, 531, mayday:, *event*"></textarea>
-            <p class="field-hint">Comma or newline separated. Plain terms match the product start; *term* matches anywhere.</p>
+            <textarea id="specialRulesInput" rows="3" spellcheck="false" placeholder="531, -*macbook*, *iphone*"></textarea>
+            <p class="field-hint">Plain terms match the product start. *term* matches anywhere. Use -term or -*term* to remove matches from the rule set.</p>
             <fieldset class="rule-mode" aria-label="Special buy rule mode">
               <legend>Rule mode</legend>
               <label>
@@ -385,12 +385,16 @@
                 <h3>Product Leaders</h3>
                 <p id="tableCaption">Top products by GMV under current filters.</p>
               </div>
-              <button id="resetFilters" type="button">Reset</button>
+              <div class="table-actions">
+                <button id="clearProductSelection" type="button" disabled>Clear selected</button>
+                <button id="resetFilters" type="button">Reset</button>
+              </div>
             </div>
             <div class="table-wrap">
               <table class="product-leaders-table">
                 <thead>
                   <tr>
+                    <th class="select-col">Select</th>
                     <th><button class="sort-button" type="button" data-sort="product">Product</button></th>
                     <th><button class="sort-button" type="button" data-sort="gmv">GMV</button></th>
                     <th><button class="sort-button" type="button" data-sort="orders">Orders</button></th>

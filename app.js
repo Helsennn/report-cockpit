@@ -13,6 +13,7 @@ const state = {
   buyerType: "all",
   query: "",
   selectedDates: [],
+  selectedProducts: [],
   stageMode: "split",
   productMomentumMode: "week",
   sortKey: "gmv",
@@ -82,8 +83,10 @@ const bandColors = {
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   Object.entries(attrs).forEach(([key, value]) => {
+    if (value === false || value === null || value === undefined) return;
     if (key === "class") node.className = value;
     else if (key === "text") node.textContent = value;
+    else if (value === true) node.setAttribute(key, "");
     else node.setAttribute(key, value);
   });
   children.forEach((child) => node.append(child));
@@ -195,6 +198,14 @@ function attachHtmlTooltip(node, html) {
   node.addEventListener("blur", hideTooltip);
 }
 
+function selectedProductSet() {
+  return new Set(state.selectedProducts || []);
+}
+
+function passesProductSelection(row) {
+  return !state.selectedProducts.length || state.selectedProducts.includes(row.product);
+}
+
 function rowsForCriteria(criteria = {}) {
   return state.data.records.filter((row) => {
     if (criteria.week ? row.week !== criteria.week : state.week !== "all" && row.week !== state.week) return false;
@@ -202,6 +213,7 @@ function rowsForCriteria(criteria = {}) {
     if (criteria.buyerType ? row.buyer_type !== criteria.buyerType : state.buyerType !== "all" && row.buyer_type !== state.buyerType) return false;
     if (criteria.product && row.product !== criteria.product) return false;
     if (criteria.date && (row.broadcast_date || row.date) !== criteria.date) return false;
+    if (!criteria.product && !passesProductSelection(row)) return false;
     if (!criteria.product && state.query && !row.product.toLowerCase().includes(state.query)) return false;
     if (!criteria.includeSpecial && !passesSpecialRuleMode(row)) return false;
     return true;
@@ -354,26 +366,43 @@ function parsedSpecialRules() {
     .filter(Boolean);
   const seen = new Set();
   return rawRules.flatMap((rule) => {
-    const isContains = rule.includes("*");
-    const value = normalizeMatchText(rule.replaceAll("*", ""));
-    if (!value || seen.has(`${isContains}:${value}`)) return [];
-    seen.add(`${isContains}:${value}`);
-    return [{ value, mode: isContains ? "contains" : "prefix" }];
+    const effect = rule.startsWith("-") || rule.startsWith("!") ? "except" : "include";
+    const cleanRule = effect === "except" ? normalizeMatchText(rule.slice(1)) : rule;
+    const isContains = cleanRule.includes("*");
+    const value = normalizeMatchText(cleanRule.replaceAll("*", ""));
+    const key = `${effect}:${isContains}:${value}`;
+    if (!value || seen.has(key)) return [];
+    seen.add(key);
+    return [{ value, effect, mode: isContains ? "contains" : "prefix" }];
   });
 }
 
-function specialPurchaseReason(row) {
+function specialRuleLabel(rule) {
+  const value = rule.mode === "contains" ? `*${rule.value}*` : rule.value;
+  return rule.effect === "except" ? `-${value}` : value;
+}
+
+function specialRuleMatches(rule, product) {
+  return rule.mode === "contains" ? product.includes(rule.value) : product.startsWith(rule.value);
+}
+
+function specialPurchaseMatch(row) {
   const product = normalizeMatchText(row.product);
-  if (!product) return "";
-  const rule = parsedSpecialRules().find((item) =>
-    item.mode === "contains" ? product.includes(item.value) : product.startsWith(item.value),
-  );
-  if (!rule) return "";
-  return rule.mode === "contains" ? `contains ${rule.value}` : `prefix ${rule.value}`;
+  if (!product) return { matched: false };
+  const rules = parsedSpecialRules();
+  const includeRule = rules.find((rule) => rule.effect === "include" && specialRuleMatches(rule, product));
+  if (!includeRule) return { matched: false };
+  const exceptRule = rules.find((rule) => rule.effect === "except" && specialRuleMatches(rule, product));
+  if (exceptRule) return { matched: false, excepted: true, reason: specialRuleLabel(exceptRule) };
+  return { matched: true, reason: specialRuleLabel(includeRule) };
+}
+
+function specialPurchaseReason(row) {
+  return specialPurchaseMatch(row).reason || "";
 }
 
 function isSpecialPurchase(row) {
-  return Boolean(specialPurchaseReason(row));
+  return specialPurchaseMatch(row).matched;
 }
 
 function passesSpecialRuleMode(row) {
@@ -1020,6 +1049,7 @@ function getFilteredRows(options = {}) {
     ignoreWeek = false,
     ignorePriceBand = false,
     ignoreBuyerType = false,
+    ignoreProductSelection = false,
     includeSpecial = false,
   } = options;
   const data = state.data;
@@ -1027,14 +1057,15 @@ function getFilteredRows(options = {}) {
     if (!ignoreWeek && state.week !== "all" && row.week !== state.week) return false;
     if (!ignorePriceBand && state.priceBand !== "all" && row.price_band !== state.priceBand) return false;
     if (state.query && !row.product.toLowerCase().includes(state.query)) return false;
+    if (!ignoreProductSelection && !passesProductSelection(row)) return false;
     if (!ignoreBuyerType && state.buyerType !== "all" && row.buyer_type !== state.buyerType) return false;
     if (!includeSpecial && !passesSpecialRuleMode(row)) return false;
     return true;
   });
 }
 
-function getCurrentRows() {
-  return getFilteredRows();
+function getCurrentRows(options = {}) {
+  return getFilteredRows(options);
 }
 
 function aggregateRows(rows) {
@@ -1212,11 +1243,12 @@ function activeInWeekDates() {
 }
 
 function baseRowsForWeek(label = focusWeekLabel(), options = {}) {
-  const { ignoreBuyerType = false, includeSpecial = false } = options;
+  const { ignoreBuyerType = false, ignoreProductSelection = false, includeSpecial = false } = options;
   return state.data.records.filter((row) => {
     if (row.week !== label) return false;
     if (state.priceBand !== "all" && row.price_band !== state.priceBand) return false;
     if (state.query && !row.product.toLowerCase().includes(state.query)) return false;
+    if (!ignoreProductSelection && !passesProductSelection(row)) return false;
     if (!ignoreBuyerType && state.buyerType !== "all" && row.buyer_type !== state.buyerType) return false;
     if (!includeSpecial && !passesSpecialRuleMode(row)) return false;
     return true;
@@ -1235,6 +1267,7 @@ function describeActiveScope() {
     state.week === "all" ? "Rolling 4W" : state.week,
     state.priceBand === "all" ? "all CPI" : `CPI ${state.priceBand}`,
     state.buyerType === "all" ? "all buyers" : state.buyerType,
+    state.selectedProducts.length ? `${state.selectedProducts.length} selected products` : "",
     state.query ? `"${state.query}"` : "",
   ].filter(Boolean).join(" · ");
 }
@@ -1512,10 +1545,14 @@ function renderKpis(rows, comparisonRows) {
 }
 
 function renderActiveFilters() {
-  const ruleCount = parsedSpecialRules().length;
+  const rules = parsedSpecialRules();
+  const includeCount = rules.filter((rule) => rule.effect === "include").length;
+  const exceptCount = rules.filter((rule) => rule.effect === "except").length;
+  const ruleCount = includeCount + exceptCount;
+  const ruleNote = exceptCount ? `${includeCount}+${exceptCount} except` : `${ruleCount}`;
   const modeLabel = {
-    exclude: `${ruleCount} rules excluded`,
-    only: `only ${ruleCount} rule matches`,
+    exclude: `${ruleNote} rules excluded`,
+    only: `only ${ruleNote} rule matches`,
     all: "rules included",
   }[state.specialRuleMode];
   const filters = [
@@ -1524,6 +1561,7 @@ function renderActiveFilters() {
     ["Buyer", state.buyerType === "all" ? "New + returning" : state.buyerType],
     ["Special", modeLabel],
   ];
+  if (state.selectedProducts.length) filters.push(["Products", `${state.selectedProducts.length} selected`]);
   if (state.query) filters.push(["Product", state.query]);
 
   document.querySelector("#activeFilters").replaceChildren(
@@ -1614,7 +1652,7 @@ function renderSpecialPurchaseSummary() {
   const summary = summarizeSpecialPurchases(rows);
   const top = summary.products.slice(0, 3);
   button.disabled = rows.length === 0;
-  const ruleLabels = parsedSpecialRules().map((rule) => rule.mode === "contains" ? `*${rule.value}*` : rule.value).join(", ");
+  const ruleLabels = parsedSpecialRules().map(specialRuleLabel).join(", ");
   const modeCopy = {
     exclude: "Matched products are excluded from charts.",
     only: "Dashboard is showing only matched products.",
@@ -3162,22 +3200,47 @@ function updateSortButtons() {
   });
 }
 
+function setProductSelected(product, isSelected) {
+  const current = selectedProductSet();
+  if (isSelected) current.add(product);
+  else current.delete(product);
+  state.selectedProducts = [...current];
+  render();
+}
+
+function clearProductSelection() {
+  state.selectedProducts = [];
+  render();
+}
+
 function renderTable(rows) {
   const products = sortedProducts(rows);
   const tbody = document.querySelector("#productTable");
+  const selected = selectedProductSet();
 
   if (!products.length) {
     tbody.replaceChildren(
       el("tr", {}, [
-        el("td", { colspan: "7", class: "empty-state" }, [
+        el("td", { colspan: "8", class: "empty-state" }, [
           document.createTextNode("No products match the current filters."),
         ]),
       ]),
     );
   } else {
     tbody.replaceChildren(
-      ...products.slice(0, 30).map((item) =>
+      ...products.slice(0, 50).map((item) =>
         el("tr", { class: "product-row", tabindex: "0", "data-product": item.product }, [
+          el("td", { class: "select-cell" }, [
+            el("label", { class: "product-select" }, [
+              el("input", {
+                type: "checkbox",
+                "data-product-select": item.product,
+                checked: selected.has(item.product),
+                "aria-label": `Select ${item.product}`,
+              }),
+              el("span", { class: "sr-only" }, [document.createTextNode(`Select ${item.product}`)]),
+            ]),
+          ]),
           el("td", {}, [el("span", { class: "product-name" }, [document.createTextNode(item.product)])]),
           el("td", {}, [document.createTextNode(fmtMoney(item.gmv))]),
           el("td", {}, [document.createTextNode(fmtNum(item.orders))]),
@@ -3190,6 +3253,13 @@ function renderTable(rows) {
     );
   }
 
+  tbody.querySelectorAll("[data-product-select]").forEach((checkbox) => {
+    checkbox.addEventListener("click", (event) => event.stopPropagation());
+    checkbox.addEventListener("change", () => {
+      setProductSelected(checkbox.dataset.productSelect, checkbox.checked);
+    });
+  });
+
   tbody.querySelectorAll(".product-row").forEach((row) => {
     const openProduct = () => {
       const product = row.dataset.product;
@@ -3200,8 +3270,12 @@ function renderTable(rows) {
         pin: { type: "product", value: product, label: product.length > 30 ? `${product.slice(0, 30)}...` : product },
       });
     };
-    row.addEventListener("click", openProduct);
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("input, label, button")) return;
+      openProduct();
+    });
     row.addEventListener("keydown", (event) => {
+      if (event.target.closest("input, label, button")) return;
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       openProduct();
@@ -3209,7 +3283,14 @@ function renderTable(rows) {
   });
 
   updateSortButtons();
-  document.querySelector("#tableCaption").textContent = `${products.length} products matched current filters.`;
+  const selectedRows = selected.size ? rows.filter((row) => selected.has(row.product)) : [];
+  const selectedMetrics = aggregateRows(selectedRows);
+  const selectedCopy = selected.size
+    ? ` ${selected.size} selected · ${fmtMoney(selectedMetrics.gmv)} GMV · ${fmtNum(selectedMetrics.orders)} orders.`
+    : " Check products to build a custom summed view.";
+  document.querySelector("#tableCaption").textContent = `${products.length} products available under current filters.${selectedCopy}`;
+  const clearButton = document.querySelector("#clearProductSelection");
+  if (clearButton) clearButton.disabled = !selected.size;
 }
 
 function render() {
@@ -3242,7 +3323,7 @@ function render() {
   drawProductMomentum(comparisonRows);
   drawWeekdayHeatmap(rows);
   renderNewReturningTable(buyerScopeRows);
-  renderTable(rows);
+  renderTable(getCurrentRows({ ignoreProductSelection: true }));
   requestAnimationFrame(replayChartAnimations);
 }
 
@@ -3377,6 +3458,7 @@ async function init() {
       state.buyerType = "all";
       state.query = "";
       state.selectedDates = [];
+      state.selectedProducts = [];
       state.specialRuleMode = "exclude";
       state.specialRulesText = defaultSpecialRulesText;
       saveSpecialPreference();
@@ -3388,6 +3470,7 @@ async function init() {
       syncFilterControls();
       render();
     });
+    document.querySelector("#clearProductSelection")?.addEventListener("click", clearProductSelection);
     document.querySelectorAll(".sort-button").forEach((button) => {
       button.addEventListener("click", () => {
         const nextKey = button.dataset.sort;
