@@ -52,17 +52,25 @@
             <datalist id="productSuggestions"></datalist>
           </section>
 
-          <section class="control-group">
-            <label class="toggle-row">
-              <input id="excludeSpecialToggle" type="checkbox" checked />
-              <span>Exclude special buy rules</span>
-            </label>
-          </section>
-
           <section class="control-group special-rules-group">
             <label for="specialRulesInput">Special buy rules</label>
             <textarea id="specialRulesInput" rows="3" spellcheck="false" placeholder="530, 531, mayday:, *event*"></textarea>
             <p class="field-hint">Comma or newline separated. Plain terms match the product start; *term* matches anywhere.</p>
+            <fieldset class="rule-mode" aria-label="Special buy rule mode">
+              <legend>Rule mode</legend>
+              <label>
+                <input type="radio" name="specialRuleMode" value="exclude" checked />
+                <span>Exclude</span>
+              </label>
+              <label>
+                <input type="radio" name="specialRuleMode" value="only" />
+                <span>Only include</span>
+              </label>
+              <label>
+                <input type="radio" name="specialRuleMode" value="all" />
+                <span>Include all</span>
+              </label>
+            </fieldset>
           </section>
         </form>
 
@@ -86,9 +94,9 @@
           <div id="activeFilters"></div>
         </section>
 
-        <section class="special-panel" aria-label="Special purchase exclusions">
+        <section class="special-panel" aria-label="Special purchase rule matches">
           <div class="special-head">
-            <span>Excluded special buys</span>
+            <span>Rule match summary</span>
             <button id="viewSpecialBuys" type="button">View</button>
           </div>
           <div id="specialSummary" class="special-summary"></div>
