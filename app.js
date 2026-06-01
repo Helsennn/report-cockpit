@@ -13,6 +13,7 @@ const state = {
   buyerType: "all",
   query: "",
   selectedDates: [],
+  stageMode: "split",
   sortKey: "gmv",
   sortDir: "desc",
 };
@@ -42,6 +43,7 @@ const kpiStorageKey = "homeDashboardKpiTilesV1";
 const pinsStorageKey = "homeDashboardPinsV1";
 const specialStorageKey = "homeDashboardExcludeSpecialV1";
 const specialRulesStorageKey = "homeDashboardSpecialRulesV1";
+const stageModeStorageKey = "homeDashboardStageModeV1";
 const broadcastDayCutoffHour = 3;
 const rollingWeekCount = 4;
 const maxKpiTiles = 10;
@@ -290,6 +292,38 @@ function loadSpecialPreference() {
     state.specialRuleMode = "exclude";
     state.specialRulesText = defaultSpecialRulesText;
   }
+}
+
+function saveStageMode() {
+  try {
+    localStorage.setItem(stageModeStorageKey, state.stageMode);
+  } catch {
+    // Layout preference is optional.
+  }
+}
+
+function loadStageMode() {
+  try {
+    const saved = localStorage.getItem(stageModeStorageKey);
+    state.stageMode = ["split", "date", "rolling"].includes(saved) ? saved : "split";
+  } catch {
+    state.stageMode = "split";
+  }
+}
+
+function renderStageMode() {
+  const stage = document.querySelector(".analysis-stage");
+  if (stage) stage.dataset.stageMode = state.stageMode;
+  const label = document.querySelector("#stageModeLabel");
+  const labelText = {
+    split: "Split view",
+    date: "Date focus",
+    rolling: "Rolling focus",
+  }[state.stageMode] || "Split view";
+  if (label) label.textContent = labelText;
+  document.querySelectorAll(".stage-switch [data-stage-mode]").forEach((button) => {
+    button.setAttribute("aria-pressed", button.dataset.stageMode === state.stageMode ? "true" : "false");
+  });
 }
 
 function normalizeMatchText(value) {
@@ -3147,6 +3181,7 @@ function render() {
   renderActiveFilters();
   renderSpecialPurchaseSummary();
   renderPins();
+  renderStageMode();
   renderKpis(rows, comparisonRows);
   renderInsights(rows, comparisonRows);
   renderAlerts(comparisonRows);
@@ -3182,6 +3217,7 @@ async function init() {
     loadKpiTiles();
     loadPins();
     loadSpecialPreference();
+    loadStageMode();
     if (state.uploadedRows.length) state.data = rebuildDataWithUploads();
 
     document.querySelector("#sourceNote").textContent = state.data.source_note;
@@ -3218,6 +3254,14 @@ async function init() {
     document.querySelector("#clearDaySelection").addEventListener("click", () => {
       state.selectedDates = [];
       render();
+    });
+    document.querySelectorAll(".stage-switch [data-stage-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.stageMode = button.dataset.stageMode;
+        saveStageMode();
+        renderStageMode();
+        requestAnimationFrame(replayChartAnimations);
+      });
     });
     document.querySelector("#applyDateRange").addEventListener("click", applyRangeFromControls);
     document.querySelector("#rangeStart").addEventListener("change", applyRangeFromControls);

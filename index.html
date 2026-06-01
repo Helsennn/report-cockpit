@@ -135,7 +135,19 @@
 
         <section class="kpi-grid" id="kpiGrid"></section>
 
-        <section class="analysis-stage" aria-label="Selected date range and rolling four week comparison">
+        <div class="stage-toolbar" aria-label="Analysis stage layout">
+          <div>
+            <p class="eyebrow">Analysis layout</p>
+            <strong id="stageModeLabel">Split view</strong>
+          </div>
+          <div class="stage-switch" role="group" aria-label="Choose analysis layout">
+            <button type="button" data-stage-mode="split">Split view</button>
+            <button type="button" data-stage-mode="date">Date focus</button>
+            <button type="button" data-stage-mode="rolling">Rolling focus</button>
+          </div>
+        </div>
+
+        <section class="analysis-stage" data-stage-mode="split" aria-label="Selected date range and rolling four week comparison">
           <section class="inweek-section" aria-label="In-week selected day analysis">
             <div class="section-head">
               <div>
