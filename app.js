@@ -12,6 +12,7 @@ const state = {
   priceBand: "all",
   buyerType: "all",
   query: "",
+  selectedDates: [],
   sortKey: "gmv",
   sortDir: "desc",
 };
@@ -222,6 +223,7 @@ function applyChartFilters(criteria = {}) {
   if (criteria.priceBand) state.priceBand = criteria.priceBand;
   if (criteria.buyerType) state.buyerType = criteria.buyerType;
   if (criteria.product) state.query = criteria.product.toLowerCase();
+  pruneSelectedDates();
   syncFilterControls();
 }
 
@@ -1132,6 +1134,49 @@ function localWeekdayIndex(dateText) {
   const [year, month, day] = String(dateText).split("-").map(Number);
   const dayIndex = new Date(year, month - 1, day).getDay();
   return dayIndex === 0 ? 6 : dayIndex - 1;
+}
+
+function shortDateLabel(dateText) {
+  const [year, month, day] = String(dateText).split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return `${weekdayLabels[localWeekdayIndex(dateText)]} ${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function datesForWeek(label = focusWeekLabel()) {
+  const info = state.data.weeks.find((week) => week.label === label);
+  if (!info) {
+    return [...new Set(state.data.records.filter((row) => row.week === label).map((row) => row.broadcast_date || row.date))].sort();
+  }
+  const start = parseDateValue(info.start);
+  return Array.from({ length: 7 }, (_, index) => isoDate(addDays(start, index)));
+}
+
+function pruneSelectedDates() {
+  const valid = new Set(datesForWeek());
+  state.selectedDates = state.selectedDates.filter((date) => valid.has(date));
+}
+
+function activeInWeekDates() {
+  return state.selectedDates.length ? state.selectedDates : datesForWeek();
+}
+
+function baseRowsForWeek(label = focusWeekLabel(), options = {}) {
+  const { ignoreBuyerType = false, includeSpecial = false } = options;
+  return state.data.records.filter((row) => {
+    if (row.week !== label) return false;
+    if (state.priceBand !== "all" && row.price_band !== state.priceBand) return false;
+    if (state.query && !row.product.toLowerCase().includes(state.query)) return false;
+    if (!ignoreBuyerType && state.buyerType !== "all" && row.buyer_type !== state.buyerType) return false;
+    if (!includeSpecial && !passesSpecialRuleMode(row)) return false;
+    return true;
+  });
+}
+
+function inWeekRows(options = {}) {
+  const rows = baseRowsForWeek(focusWeekLabel(), options);
+  if (!state.selectedDates.length) return rows;
+  const selected = new Set(state.selectedDates);
+  return rows.filter((row) => selected.has(row.broadcast_date || row.date));
 }
 
 function describeActiveScope() {
@@ -2628,6 +2673,214 @@ function drawWeekdayHeatmap(rows) {
   svg.append(note);
 }
 
+function dailyRowsForFocusedWeek(rows, dates = activeInWeekDates()) {
+  return dates.map((date) => {
+    const dayRows = rows.filter((row) => (row.broadcast_date || row.date) === date);
+    return { date, label: shortDateLabel(date), ...aggregateRows(dayRows) };
+  });
+}
+
+function renderDaySelector(rows) {
+  const host = document.querySelector("#dayChipRow");
+  const note = document.querySelector("#daySelectionNote");
+  const clear = document.querySelector("#clearDaySelection");
+  if (!host || !note || !clear) return;
+
+  pruneSelectedDates();
+  const selected = new Set(state.selectedDates);
+  const daily = dailyRowsForFocusedWeek(rows, datesForWeek());
+  document.querySelector("#inWeekEyebrow").textContent = `${focusWeekLabel()} · ${state.selectedDates.length ? `${state.selectedDates.length} selected day(s)` : "full week"}`;
+  clear.setAttribute("aria-pressed", state.selectedDates.length ? "false" : "true");
+  note.textContent = state.selectedDates.length
+    ? `Showing ${state.selectedDates.map(shortDateLabel).join(", ")} only.`
+    : "No day selected means the full focused week.";
+
+  host.replaceChildren(
+    ...daily.map((day) => {
+      const isActive = !selected.size || selected.has(day.date);
+      const button = el("button", {
+        type: "button",
+        class: `day-chip ${isActive ? "is-active" : ""}`,
+        "data-date": day.date,
+        "aria-pressed": selected.has(day.date) ? "true" : "false",
+      }, [
+        el("span", {}, [document.createTextNode(day.label)]),
+        el("strong", {}, [document.createTextNode(fmtMoney(day.gmv))]),
+        el("em", {}, [document.createTextNode(`${fmtNum(day.orders)} orders`)]),
+      ]);
+      attachHtmlTooltip(button, `<strong>${escapeHtml(day.label)}</strong><br>GMV ${fmtMoney(day.gmv)}<br>Orders ${fmtNum(day.orders)}<br>Buyers ${fmtNum(day.buyers)}`);
+      return button;
+    }),
+  );
+
+  host.querySelectorAll(".day-chip").forEach((button) => {
+    button.addEventListener("click", () => {
+      const date = button.dataset.date;
+      const current = new Set(state.selectedDates);
+      if (!current.size) {
+        state.selectedDates = [date];
+      } else if (current.has(date) && current.size === 1) {
+        state.selectedDates = [];
+      } else if (current.has(date)) {
+        current.delete(date);
+        state.selectedDates = [...current];
+      } else {
+        current.add(date);
+        state.selectedDates = [...current].sort();
+      }
+      render();
+    });
+  });
+}
+
+function drawDailyTrend(rows) {
+  const svg = chartScaffold("#dailyTrendChart", "0 0 940 390", "Daily GMV orders and buyers for selected week");
+  addDefs(svg);
+  const daily = dailyRowsForFocusedWeek(rows);
+  const left = 92;
+  const top = 40;
+  const width = 760;
+  const height = 250;
+  const maxGmv = Math.max(Math.ceil(Math.max(...daily.map((day) => day.gmv), 1) / 2500) * 2500, 1);
+  const maxCount = Math.max(Math.ceil(Math.max(...daily.map((day) => day.orders), 1) / 100) * 100, 1);
+  drawGrid(svg, left, top, width, height, 4, maxGmv, fmtMoney);
+
+  const slotW = width / daily.length;
+  const barW = Math.min(68, slotW - 18);
+  const orderPoints = [];
+  const buyerPoints = [];
+  daily.forEach((day, index) => {
+    const x = left + slotW * (index + 0.5);
+    const h = (day.gmv / maxGmv) * height;
+    const y = top + height - h;
+    const rect = svgEl("rect", { x: x - barW / 2, y, width: barW, height: h, rx: 10, fill: "url(#barGrad)" });
+    animateRect(rect);
+    attachTooltip(rect, `<strong>${escapeHtml(day.label)}</strong><br>GMV ${fmtMoney(day.gmv)}<br>Orders ${fmtNum(day.orders)}<br>Buyers ${fmtNum(day.buyers)}`);
+    attachChartAction(rect, `${day.label} daily GMV`, () => {
+      openCriteriaDrilldown({ title: `${day.label} GMV`, kicker: "Selected day", criteria: { week: focusWeekLabel(), date: day.date } });
+    });
+    svg.append(rect);
+
+    const orderY = top + height - (day.orders / maxCount) * height;
+    const buyerY = top + height - (day.buyers / maxCount) * height;
+    orderPoints.push([x, orderY, day]);
+    buyerPoints.push([x, buyerY, day]);
+
+    const label = svgEl("text", { x, y: top + height + 31, "text-anchor": "middle", class: "axis-label" });
+    label.textContent = day.label;
+    svg.append(label);
+  });
+
+  const drawDailyLine = (points, color, field, label) => {
+    const lineD = pathFromPoints(points);
+    svg.append(animatedPath({ d: lineD, fill: "none", stroke: color, "stroke-width": 4, "stroke-linecap": "round" }));
+    points.forEach(([x, y, day]) => {
+      const dot = animatedDot({ cx: x, cy: y, r: 5.5, fill: color, stroke: "#fffaf4", "stroke-width": 2 });
+      attachTooltip(dot, `<strong>${escapeHtml(day.label)} ${escapeHtml(label)}</strong><br>${fmtNum(day[field])}`);
+      svg.append(dot);
+    });
+  };
+  drawDailyLine(orderPoints, "#dc5b42", "orders", "orders");
+  drawDailyLine(buyerPoints, "#477f9c", "buyers", "buyers");
+  drawLegend(svg, [
+    { label: "GMV", color: "#f97316", width: 82 },
+    { label: "Orders", color: "#dc5b42", width: 104 },
+    { label: "Buyers", color: "#477f9c", width: 104 },
+  ], left, 356, 760);
+
+  const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
+  note.textContent = `${focusWeekLabel()} · count scale max ${fmtNum(maxCount)}`;
+  svg.append(note);
+}
+
+function drawDailyCpiMix(rows) {
+  const svg = chartScaffold("#dailyCpiMixChart", "0 0 940 430", "Daily CPI band GMV mix for selected week");
+  const dates = activeInWeekDates();
+  const data = dates.map((date) => {
+    const dayRows = rows.filter((row) => (row.broadcast_date || row.date) === date);
+    const bands = summarizePriceBandsFromRows(dayRows);
+    const total = bands.reduce((sum, band) => sum + band.gmv, 0);
+    return { date, label: shortDateLabel(date), total, bands };
+  });
+  const left = 92;
+  const top = 38;
+  const width = 760;
+  const height = 270;
+  drawGrid(svg, left, top, width, height, 4, 100, (value) => `${value.toFixed(0)}%`);
+  const columnW = Math.min(60, width / data.length - 18);
+  data.forEach((day, index) => {
+    const x = left + (width * (index + 0.5)) / data.length - columnW / 2;
+    let yCursor = top + height;
+    day.bands.forEach((band) => {
+      const pct = day.total ? (band.gmv / day.total) * 100 : 0;
+      const h = (pct / 100) * height;
+      if (h <= 0) return;
+      yCursor -= h;
+      const rect = svgEl("rect", { x, y: yCursor, width: columnW, height: h, rx: h > 15 ? 7 : 3, fill: bandColors[band.band] });
+      animateRect(rect);
+      attachTooltip(rect, `<strong>${escapeHtml(day.label)} CPI ${escapeHtml(band.band)}</strong><br>${pct.toFixed(1)}% of GMV<br>GMV ${fmtMoney(band.gmv)}<br>Orders ${fmtNum(band.orders)}`);
+      attachChartAction(rect, `${day.label} CPI ${band.band}`, () => {
+        openCriteriaDrilldown({ title: `${day.label} · CPI ${band.band}`, kicker: "Selected day + CPI", criteria: { week: focusWeekLabel(), date: day.date, priceBand: band.band } });
+      });
+      svg.append(rect);
+    });
+    const label = svgEl("text", { x: x + columnW / 2, y: top + height + 31, "text-anchor": "middle", class: "axis-label" });
+    label.textContent = day.label;
+    svg.append(label);
+  });
+  drawLegend(
+    svg,
+    priceBandOrder.map((band) => ({ label: band, color: bandColors[band], width: band.length > 5 ? 90 : 72 })),
+    left,
+    382,
+    760,
+  );
+}
+
+function drawSelectedDayProductLeaders(rows) {
+  const svg = chartScaffold("#dailyProductLeadersChart", "0 0 940 430", "Selected days product leaders");
+  const products = aggregateProducts(rows).sort((a, b) => b.gmv - a.gmv || b.orders - a.orders).slice(0, 10);
+  if (!products.length) {
+    drawEmptyChart(svg, "No products under selected day filters.", 470, 210);
+    return;
+  }
+  const left = 340;
+  const top = 40;
+  const width = 500;
+  const rowH = 28;
+  const gap = 10;
+  const max = Math.max(...products.map((product) => product.gmv), 1);
+  products.forEach((product, index) => {
+    const y = top + index * (rowH + gap);
+    const label = svgEl("text", { x: left - 12, y: y + 19, "text-anchor": "end", class: "product-axis-label" });
+    label.textContent = product.product.length > 38 ? `${product.product.slice(0, 38)}...` : product.product;
+    svg.append(label);
+    const barW = (product.gmv / max) * width;
+    const rect = svgEl("rect", { x: left, y, width: barW, height: rowH, rx: 8, fill: index < 3 ? "#f97316" : "#f59e0b" });
+    animateRect(rect, "x");
+    attachTooltip(rect, `<strong>${escapeHtml(product.product)}</strong><br>GMV ${fmtMoney(product.gmv)}<br>Orders ${fmtNum(product.orders)}<br>Buyers ${fmtNum(product.buyers)}<br>AOV ${fmtMoney(product.aov)}`);
+    attachChartAction(rect, `${product.product} selected days`, () => {
+      openDrilldown({ title: product.product, kicker: "Selected days product", rows: rows.filter((row) => row.product === product.product), criteria: { product: product.product } });
+    });
+    svg.append(rect);
+    const value = svgEl("text", { x: left + barW + 8, y: y + 19, class: "axis-label" });
+    value.textContent = fmtMoney(product.gmv);
+    svg.append(value);
+  });
+  const note = svgEl("text", { x: 840, y: 398, "text-anchor": "end", class: "chart-title-note" });
+  note.textContent = state.selectedDates.length ? "Filtered to selected days" : "Full focused week";
+  svg.append(note);
+}
+
+function renderInWeekAnalysis() {
+  const weekRows = baseRowsForWeek();
+  renderDaySelector(weekRows);
+  const rows = inWeekRows();
+  drawDailyTrend(rows);
+  drawDailyCpiMix(rows);
+  drawSelectedDayProductLeaders(rows);
+}
+
 function renderNewReturningTable(rows) {
   const weekly = groupWeeklyBuyerTypes(rows);
   const rowsOut = weekly.flatMap((week) => week.types.map((type) => ({ week: week.week, ...type })));
@@ -2729,6 +2982,7 @@ function render() {
   drawNewReturningAovFrequency(buyerScopeRows);
   drawBuyerRepeat(comparisonRows);
   drawConversion(comparisonRows);
+  renderInWeekAnalysis();
   drawWaterfallChart(comparisonRows);
   drawCpiShareDonut(rows);
   drawProductMomentum(comparisonRows);
@@ -2761,16 +3015,19 @@ async function init() {
 
     document.querySelector("#weekFilter").addEventListener("change", (event) => {
       state.week = event.target.value;
+      pruneSelectedDates();
       syncFilterControls();
       render();
     });
     document.querySelector("#latestWeekShortcut").addEventListener("click", () => {
       state.week = latestWeek().week;
+      pruneSelectedDates();
       syncFilterControls();
       render();
     });
     document.querySelector("#rollingShortcut").addEventListener("click", () => {
       state.week = "all";
+      pruneSelectedDates();
       syncFilterControls();
       render();
     });
@@ -2780,6 +3037,10 @@ async function init() {
     });
     document.querySelector("#buyerTypeFilter").addEventListener("change", (event) => {
       state.buyerType = event.target.value;
+      render();
+    });
+    document.querySelector("#clearDaySelection").addEventListener("click", () => {
+      state.selectedDates = [];
       render();
     });
     document.querySelector("#productSearch").addEventListener("input", debounce((event) => {
@@ -2843,6 +3104,7 @@ async function init() {
       state.priceBand = "all";
       state.buyerType = "all";
       state.query = "";
+      state.selectedDates = [];
       state.specialRuleMode = "exclude";
       state.specialRulesText = defaultSpecialRulesText;
       saveSpecialPreference();

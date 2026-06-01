@@ -135,6 +135,49 @@
 
         <section class="kpi-grid" id="kpiGrid"></section>
 
+        <section class="inweek-section" aria-label="In-week selected day analysis">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow" id="inWeekEyebrow">Selected week</p>
+              <h3>In-week / Selected Days</h3>
+            </div>
+            <button id="clearDaySelection" type="button">All days</button>
+          </div>
+          <div class="day-chip-row" id="dayChipRow" aria-label="Select days inside the focused week"></div>
+          <p class="field-hint" id="daySelectionNote">No day selected means the full focused week.</p>
+          <div class="chart-grid inweek-grid">
+            <article class="panel wide">
+              <div class="panel-head">
+                <div>
+                  <h3>Daily GMV, Orders & Buyers</h3>
+                  <p>Bars show GMV; lines show orders and buyer count for the selected days.</p>
+                </div>
+              </div>
+              <div class="chart" id="dailyTrendChart" role="img" aria-label="Daily GMV orders and buyers chart"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Daily CPI Mix</h3>
+                  <p>Target-price band GMV mix by selected day.</p>
+                </div>
+              </div>
+              <div class="chart" id="dailyCpiMixChart" role="img" aria-label="Daily CPI band mix chart"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Selected Days Product Leaders</h3>
+                  <p>Top products only for the days selected above.</p>
+                </div>
+              </div>
+              <div class="chart" id="dailyProductLeadersChart" role="img" aria-label="Selected days product leaders chart"></div>
+            </article>
+          </div>
+        </section>
+
         <section class="chart-grid">
           <article class="panel wide">
             <div class="panel-head">
