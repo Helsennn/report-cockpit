@@ -209,6 +209,8 @@ function syncFilterControls() {
   document.querySelector("#buyerTypeFilter").value = state.buyerType;
   document.querySelector("#productSearch").value = state.query;
   document.querySelector("#specialRulesInput").value = state.specialRulesText;
+  document.querySelector("#latestWeekShortcut")?.setAttribute("aria-pressed", state.week !== "all" && state.week === latestWeek().week ? "true" : "false");
+  document.querySelector("#rollingShortcut")?.setAttribute("aria-pressed", state.week === "all" ? "true" : "false");
   document.querySelectorAll("[name='specialRuleMode']").forEach((input) => {
     input.checked = input.value === state.specialRuleMode;
   });
@@ -942,7 +944,7 @@ function summarizePriceBandsFromRows(rows) {
 }
 
 function groupWeeklyPriceBands(rows) {
-  const weeks = state.data.weekly.map((week) => week.week);
+  const weeks = activeWeekLabels();
   const map = new Map();
   weeks.forEach((week) => {
     map.set(week, new Map(priceBandOrder.map((band) => [band, { band, gmv: 0, orders: 0, buyers: new Set() }])));
@@ -971,7 +973,7 @@ function groupWeeklyPriceBands(rows) {
 }
 
 function groupWeeklyBuyerTypes(rows) {
-  const weeks = state.data.weekly.map((week) => week.week);
+  const weeks = activeWeekLabels();
   return weeks.map((week) => {
     const weeklyRows = rows.filter((row) => row.week === week);
     const typed = aggregateRowsByType(weeklyRows);
@@ -1080,6 +1082,10 @@ function setOptions() {
 
 function latestWeek() {
   return state.data.weekly[state.data.weekly.length - 1];
+}
+
+function activeWeekLabels() {
+  return state.week === "all" ? state.data.weekly.map((week) => week.week) : [state.week];
 }
 
 function focusWeekLabel() {
@@ -1336,6 +1342,41 @@ function renderActiveFilters() {
       ]),
     ),
   );
+}
+
+function renderScopeCopy() {
+  const isRolling = state.week === "all";
+  const focusLabel = focusWeekLabel();
+  document.querySelector("#scopeEyebrow").textContent = isRolling
+    ? "36SShome · Rolling 4 Weeks"
+    : `36SShome · ${focusLabel}`;
+  document.querySelector("#scopeTitle").textContent = isRolling
+    ? "GMV, Buyers, CPI Bands & Retention"
+    : "Weekly GMV, Daily Shape & Retention";
+  document.querySelector("#priceBandStackTitle").textContent = isRolling
+    ? "Rolling 4W CPI Band GMV"
+    : `${focusLabel} CPI Band GMV`;
+  document.querySelector("#priceBandStackCopy").textContent = isRolling
+    ? "Stacked weekly GMV by target-price band."
+    : "Selected-week GMV split by target-price band.";
+  document.querySelector("#priceBandShareTitle").textContent = isRolling
+    ? "Rolling 4W CPI Band Mix %"
+    : `${focusLabel} CPI Band Mix %`;
+  document.querySelector("#priceBandShareCopy").textContent = isRolling
+    ? "Each week normalized to 100% GMV mix by target-price band."
+    : "Selected-week GMV mix normalized to 100%.";
+  document.querySelector("#newReturningTitle").textContent = isRolling
+    ? "New vs Returning GMV %"
+    : `${focusLabel} New vs Returning`;
+  document.querySelector("#newReturningCopy").textContent = isRolling
+    ? "Four-week acquisition and retention mix."
+    : "Selected-week acquisition and retention mix.";
+  document.querySelector("#weekdayTitle").textContent = isRolling
+    ? "Weekday Heatmap"
+    : `${focusLabel} Daily GMV`;
+  document.querySelector("#weekdayCopy").textContent = isRolling
+    ? "GMV concentration by week and day of week under current filters."
+    : "Day-by-day GMV inside the selected week.";
 }
 
 function specialPurchaseRowsForCurrentScope() {
@@ -2476,7 +2517,9 @@ function renderNewReturningTable(rows) {
       ]),
     ),
   );
-  document.querySelector("#newReturningCaption").textContent = `${rowsOut.length} rows across rolling 4 weeks.`;
+  document.querySelector("#newReturningCaption").textContent = state.week === "all"
+    ? `${rowsOut.length} rows across rolling 4 weeks.`
+    : `${rowsOut.length} rows for ${state.week}.`;
 }
 
 function updateSortButtons() {
@@ -2539,8 +2582,11 @@ function renderTable(rows) {
 function render() {
   const rows = getCurrentRows();
   const comparisonRows = getFilteredRows({ ignoreWeek: true });
-  const rollingRows = comparisonRows;
-  const buyerComparisonRows = getFilteredRows({ ignoreWeek: true, ignoreBuyerType: true });
+  const scopeRows = state.week === "all" ? comparisonRows : rows;
+  const buyerScopeRows = state.week === "all"
+    ? getFilteredRows({ ignoreWeek: true, ignoreBuyerType: true })
+    : getFilteredRows({ ignoreBuyerType: true });
+  renderScopeCopy();
   renderActiveFilters();
   renderSpecialPurchaseSummary();
   renderPins();
@@ -2549,17 +2595,17 @@ function render() {
   renderAlerts(comparisonRows);
   drawWeeklyGmv(comparisonRows);
   drawBarChart("#priceBandChart", summarizePriceBandsFromRows(rows), "band", "gmv", "#f97316", fmtMoney, "GMV by CPI target band under current filters");
-  drawPriceBandStacked(rollingRows);
-  drawPriceBandShare(rollingRows);
-  drawStackedNewReturning(buyerComparisonRows);
-  drawNewReturningAovFrequency(buyerComparisonRows);
+  drawPriceBandStacked(scopeRows);
+  drawPriceBandShare(scopeRows);
+  drawStackedNewReturning(buyerScopeRows);
+  drawNewReturningAovFrequency(buyerScopeRows);
   drawBuyerRepeat(comparisonRows);
   drawConversion(comparisonRows);
   drawWaterfallChart(comparisonRows);
   drawCpiShareDonut(rows);
   drawProductMomentum(comparisonRows);
   drawWeekdayHeatmap(rows);
-  renderNewReturningTable(buyerComparisonRows);
+  renderNewReturningTable(buyerScopeRows);
   renderTable(rows);
   requestAnimationFrame(replayChartAnimations);
 }
@@ -2587,6 +2633,17 @@ async function init() {
 
     document.querySelector("#weekFilter").addEventListener("change", (event) => {
       state.week = event.target.value;
+      syncFilterControls();
+      render();
+    });
+    document.querySelector("#latestWeekShortcut").addEventListener("click", () => {
+      state.week = latestWeek().week;
+      syncFilterControls();
+      render();
+    });
+    document.querySelector("#rollingShortcut").addEventListener("click", () => {
+      state.week = "all";
+      syncFilterControls();
       render();
     });
     document.querySelector("#priceBandFilter").addEventListener("change", (event) => {

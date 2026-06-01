@@ -30,6 +30,10 @@
           <section class="control-group">
             <label for="weekFilter">Week</label>
             <select id="weekFilter"></select>
+            <div class="scope-switch" aria-label="Time range shortcuts">
+              <button id="latestWeekShortcut" type="button">Latest week</button>
+              <button id="rollingShortcut" type="button">Rolling 4W</button>
+            </div>
           </section>
 
           <section class="control-group">
@@ -119,8 +123,8 @@
       <main class="dashboard" id="mainDashboard">
         <header class="topbar">
           <div>
-            <p class="eyebrow">36SShome · Rolling 4 Weeks</p>
-            <h2>GMV, Buyers, CPI Bands & Retention</h2>
+            <p class="eyebrow" id="scopeEyebrow">36SShome · Rolling 4 Weeks</p>
+            <h2 id="scopeTitle">GMV, Buyers, CPI Bands & Retention</h2>
           </div>
           <div class="date-pill" id="generatedAt">Updated</div>
         </header>
@@ -155,8 +159,8 @@
           <article class="panel">
             <div class="panel-head">
               <div>
-                <h3>Rolling 4W CPI Band GMV</h3>
-                <p>Stacked weekly GMV by target-price band.</p>
+                <h3 id="priceBandStackTitle">Rolling 4W CPI Band GMV</h3>
+                <p id="priceBandStackCopy">Stacked weekly GMV by target-price band.</p>
               </div>
             </div>
             <div class="chart" id="priceBandStackChart" role="img" aria-label="Rolling four week stacked GMV by CPI target band chart"></div>
@@ -165,8 +169,8 @@
           <article class="panel">
             <div class="panel-head">
               <div>
-                <h3>Rolling 4W CPI Band Mix %</h3>
-                <p>Each week normalized to 100% GMV mix by target-price band.</p>
+                <h3 id="priceBandShareTitle">Rolling 4W CPI Band Mix %</h3>
+                <p id="priceBandShareCopy">Each week normalized to 100% GMV mix by target-price band.</p>
               </div>
             </div>
             <div class="chart" id="priceBandShareChart" role="img" aria-label="Rolling four week CPI target band percentage mix chart"></div>
@@ -175,8 +179,8 @@
           <article class="panel">
             <div class="panel-head">
               <div>
-                <h3>New vs Returning GMV %</h3>
-                <p>Four-week acquisition and retention mix.</p>
+                <h3 id="newReturningTitle">New vs Returning GMV %</h3>
+                <p id="newReturningCopy">Four-week acquisition and retention mix.</p>
               </div>
             </div>
             <div class="chart" id="newReturningChart" role="img" aria-label="New versus returning GMV percentage chart"></div>
@@ -247,8 +251,8 @@
           <article class="panel">
             <div class="panel-head">
               <div>
-                <h3>Weekday Heatmap</h3>
-                <p>GMV concentration by week and day of week under current filters.</p>
+                <h3 id="weekdayTitle">Weekday Heatmap</h3>
+                <p id="weekdayCopy">GMV concentration by week and day of week under current filters.</p>
               </div>
             </div>
             <div class="chart" id="weekdayHeatmapChart" role="img" aria-label="Weekday GMV heatmap chart"></div>
