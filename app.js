@@ -3238,6 +3238,7 @@ function renderTable(rows) {
                 checked: selected.has(item.product),
                 "aria-label": `Select ${item.product}`,
               }),
+              el("span", { class: "product-check", "aria-hidden": "true" }),
               el("span", { class: "sr-only" }, [document.createTextNode(`Select ${item.product}`)]),
             ]),
           ]),
