@@ -896,6 +896,49 @@ button {
   gap: 14px;
 }
 
+.analysis-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1.22fr) minmax(360px, 0.78fr);
+  gap: 14px;
+  align-items: start;
+  margin: 16px 0 14px;
+}
+
+.analysis-stage .inweek-section {
+  margin: 0;
+}
+
+.rolling-stage {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.rolling-stage .panel-head {
+  padding: 15px 16px 6px;
+}
+
+.rolling-stage .panel h3 {
+  font-size: 19px;
+}
+
+.rolling-stage .panel p {
+  font-size: 13px;
+}
+
+.rolling-stage .chart {
+  height: 340px;
+  padding: 8px 14px 18px;
+}
+
+.rolling-stage .chart.tall {
+  height: 420px;
+}
+
 .inweek-section {
   margin: 16px 0;
   border: 1px solid #e8d7c5;
@@ -1571,6 +1614,17 @@ th {
 @media (max-width: 1220px) {
   .app-shell {
     grid-template-columns: 1fr;
+  }
+
+  .analysis-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .rolling-stage {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .sidebar {
