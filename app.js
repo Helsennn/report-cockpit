@@ -14,6 +14,7 @@ const state = {
   query: "",
   selectedDates: [],
   selectedProducts: [],
+  tableProducts: [],
   stageMode: "split",
   productMomentumMode: "week",
   sortKey: "gmv",
@@ -1454,17 +1455,18 @@ function renderSelectedProductSummary(rows) {
 
 function drawSelectedProductPriceChart(rows) {
   const svg = chartScaffold("#selectedProductPriceChart", "0 0 940 560", "Selected products average sold price versus target price");
-  const products = selectedProductDisplayItems(rows, 10);
+  const products = selectedProductDisplayItems(rows, 8);
   if (!products.length || !products.some((product) => product.orders)) {
     drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
     return;
   }
-  const left = 340;
-  const top = 54;
-  const width = 500;
-  const rowStep = Math.min(48, 420 / Math.max(products.length, 1));
+  const left = 312;
+  const top = 96;
+  const width = 510;
+  const plotHeight = 360;
+  const rowStep = Math.min(48, plotHeight / Math.max(products.length, 1));
   const max = niceMoneyMax(Math.max(...products.flatMap((product) => [product.aov, product.cpi]), 1));
-  drawGrid(svg, left, 40, width, 420, 4, max, fmtMoney);
+  drawHorizontalGrid(svg, left, top - 8, width, plotHeight + 18, 4, max, fmtMoney);
   drawLegend(svg, [
     { label: "Avg sold price", color: "#f97316", width: 142 },
     { label: "Target price", color: "#9a5a2e", width: 120 },
@@ -1474,16 +1476,16 @@ function drawSelectedProductPriceChart(rows) {
     const y = top + index * rowStep;
     const soldWidth = (product.aov / max) * width;
     const targetWidth = (product.cpi / max) * width;
-    const label = svgEl("text", { x: left - 14, y: y + 24, "text-anchor": "end", class: "product-axis-label" });
-    label.textContent = shortProductLabel(product.product, 39);
+    const label = svgEl("text", { x: left - 16, y: y + 27, "text-anchor": "end", class: "product-axis-label" });
+    label.textContent = shortProductLabel(product.product, 34);
     svg.append(label);
 
-    const target = svgEl("rect", { x: left, y: y + 4, width: targetWidth, height: 14, rx: 6, fill: "#9a5a2e", opacity: 0.68 });
+    const target = svgEl("rect", { x: left, y: y + 4, width: targetWidth, height: 15, rx: 6, fill: "#9a5a2e", opacity: 0.68 });
     animateRect(target, "x");
     attachTooltip(target, `<strong>${escapeHtml(product.product)}</strong><br>Target price ${fmtMoney(product.cpi)}<br>Orders ${fmtNum(product.orders)}<br>Est. target cost ${fmtMoney(product.targetCost)}`);
     svg.append(target);
 
-    const sold = svgEl("rect", { x: left, y: y + 24, width: soldWidth, height: 14, rx: 6, fill: "#f97316" });
+    const sold = svgEl("rect", { x: left, y: y + 26, width: soldWidth, height: 15, rx: 6, fill: "#f97316" });
     animateRect(sold, "x");
     attachTooltip(sold, `<strong>${escapeHtml(product.product)}</strong><br>Avg sold price ${fmtMoney(product.aov)}<br>Target price ${fmtMoney(product.cpi)}<br>Gap ${fmtMoney(product.aov - product.cpi)}`);
     attachChartAction(sold, `${product.product} price comparison`, () => {
@@ -1491,7 +1493,8 @@ function drawSelectedProductPriceChart(rows) {
     });
     svg.append(sold);
 
-    const value = svgEl("text", { x: left + Math.max(soldWidth, targetWidth) + 10, y: y + 31, class: "axis-label" });
+    const valueX = Math.min(left + width + 56, left + Math.max(soldWidth, targetWidth) + 12);
+    const value = svgEl("text", { x: valueX, y: y + 33, class: "chart-title-note" });
     value.textContent = `${fmtMoney(product.aov)} / ${fmtMoney(product.cpi)}`;
     svg.append(value);
   });
@@ -1499,17 +1502,18 @@ function drawSelectedProductPriceChart(rows) {
 
 function drawSelectedProductValueChart(rows) {
   const svg = chartScaffold("#selectedProductValueChart", "0 0 940 560", "Selected products GMV versus estimated target cost");
-  const products = selectedProductDisplayItems(rows, 10);
+  const products = selectedProductDisplayItems(rows, 8);
   if (!products.length || !products.some((product) => product.orders)) {
     drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
     return;
   }
-  const left = 330;
-  const top = 54;
-  const width = 500;
-  const rowStep = Math.min(48, 420 / Math.max(products.length, 1));
+  const left = 312;
+  const top = 96;
+  const width = 510;
+  const plotHeight = 360;
+  const rowStep = Math.min(48, plotHeight / Math.max(products.length, 1));
   const max = niceMoneyMax(Math.max(...products.flatMap((product) => [product.gmv, product.targetCost]), 1));
-  drawGrid(svg, left, 40, width, 420, 4, max, fmtMoney);
+  drawHorizontalGrid(svg, left, top - 8, width, plotHeight + 18, 4, max, fmtMoney);
   drawLegend(svg, [
     { label: "GMV", color: "#f97316", width: 82 },
     { label: "Est. target cost", color: "#477f9c", width: 142 },
@@ -1519,16 +1523,16 @@ function drawSelectedProductValueChart(rows) {
     const y = top + index * rowStep;
     const gmvWidth = (product.gmv / max) * width;
     const costWidth = (product.targetCost / max) * width;
-    const label = svgEl("text", { x: left - 14, y: y + 24, "text-anchor": "end", class: "product-axis-label" });
-    label.textContent = shortProductLabel(product.product, 37);
+    const label = svgEl("text", { x: left - 16, y: y + 27, "text-anchor": "end", class: "product-axis-label" });
+    label.textContent = shortProductLabel(product.product, 34);
     svg.append(label);
 
-    const cost = svgEl("rect", { x: left, y: y + 4, width: costWidth, height: 14, rx: 6, fill: "#477f9c", opacity: 0.72 });
+    const cost = svgEl("rect", { x: left, y: y + 4, width: costWidth, height: 15, rx: 6, fill: "#477f9c", opacity: 0.72 });
     animateRect(cost, "x");
     attachTooltip(cost, `<strong>${escapeHtml(product.product)}</strong><br>Est. target cost ${fmtMoney(product.targetCost)}<br>Target price ${fmtMoney(product.cpi)}`);
     svg.append(cost);
 
-    const gmv = svgEl("rect", { x: left, y: y + 24, width: gmvWidth, height: 14, rx: 6, fill: "#f97316" });
+    const gmv = svgEl("rect", { x: left, y: y + 26, width: gmvWidth, height: 15, rx: 6, fill: "#f97316" });
     animateRect(gmv, "x");
     attachTooltip(gmv, `<strong>${escapeHtml(product.product)}</strong><br>GMV ${fmtMoney(product.gmv)}<br>Orders ${fmtNum(product.orders)}<br>Buyers ${fmtNum(product.buyers)}`);
     attachChartAction(gmv, `${product.product} GMV comparison`, () => {
@@ -1536,7 +1540,8 @@ function drawSelectedProductValueChart(rows) {
     });
     svg.append(gmv);
 
-    const value = svgEl("text", { x: left + Math.max(gmvWidth, costWidth) + 10, y: y + 31, class: "axis-label" });
+    const valueX = Math.min(left + width + 56, left + Math.max(gmvWidth, costWidth) + 12);
+    const value = svgEl("text", { x: valueX, y: y + 33, class: "chart-title-note" });
     value.textContent = `${fmtMoney(product.gmv)} / ${fmtMoney(product.targetCost)}`;
     svg.append(value);
   });
@@ -1602,7 +1607,7 @@ function drawSelectedProductWeeklyChart(rows) {
 
 function drawSelectedProductGapChart(rows) {
   const svg = chartScaffold("#selectedProductGapChart", "0 0 940 560", "Selected products target attainment percentage");
-  const products = selectedProductDisplayItems(rows, 10).filter((product) => product.orders && product.cpi > 0);
+  const products = selectedProductDisplayItems(rows, 8).filter((product) => product.orders && product.cpi > 0);
   if (!products.length) {
     drawEmptyChart(svg, "No selected products with target price under current filters.", 470, 280);
     return;
@@ -2262,6 +2267,16 @@ function drawGrid(svg, left, top, width, height, ticks, max, formatter) {
     const y = top + height - (height * i) / ticks;
     svg.append(svgEl("line", { x1: left, y1: y, x2: left + width, y2: y, stroke: "#efe5dc" }));
     const label = svgEl("text", { x: left - 8, y: y + 4, "text-anchor": "end", class: "tick" });
+    label.textContent = formatter((max * i) / ticks);
+    svg.append(label);
+  }
+}
+
+function drawHorizontalGrid(svg, left, top, width, height, ticks, max, formatter) {
+  for (let i = 0; i <= ticks; i++) {
+    const x = left + (width * i) / ticks;
+    svg.append(svgEl("line", { x1: x, y1: top, x2: x, y2: top + height, stroke: "#efe5dc" }));
+    const label = svgEl("text", { x, y: top - 12, "text-anchor": "middle", class: "tick" });
     label.textContent = formatter((max * i) / ticks);
     svg.append(label);
   }
@@ -3674,28 +3689,73 @@ function setProductSelected(product, isSelected) {
   if (isSelected) current.add(product);
   else current.delete(product);
   state.selectedProducts = [...current];
-  renderPreservingViewport();
+  renderPreservingViewport({ product });
 }
 
 function clearProductSelection() {
   state.selectedProducts = [];
-  renderPreservingViewport();
+  renderPreservingViewport({ selector: ".table-panel" });
 }
 
-function renderPreservingViewport() {
+function productRowFor(product) {
+  return Array.from(document.querySelectorAll(".product-row")).find((row) => row.dataset.product === product) || null;
+}
+
+function viewportAnchorFor(options = {}) {
+  if (options.product) return productRowFor(options.product);
+  if (options.selector) return document.querySelector(options.selector);
+  return null;
+}
+
+function renderPreservingViewport(options = {}) {
   const scrollX = window.scrollX;
   const scrollY = window.scrollY;
+  const tableWrap = document.querySelector(".table-wrap");
+  const tableScrollTop = tableWrap?.scrollTop || 0;
+  const tableScrollLeft = tableWrap?.scrollLeft || 0;
+  const anchor = viewportAnchorFor(options);
+  const anchorTop = anchor?.getBoundingClientRect().top ?? null;
   render();
   requestAnimationFrame(() => {
-    window.scrollTo(scrollX, scrollY);
-    requestAnimationFrame(() => window.scrollTo(scrollX, scrollY));
+    const nextTableWrap = document.querySelector(".table-wrap");
+    if (nextTableWrap) {
+      nextTableWrap.scrollTop = tableScrollTop;
+      nextTableWrap.scrollLeft = tableScrollLeft;
+    }
+    const nextAnchor = viewportAnchorFor(options);
+    if (anchorTop !== null && nextAnchor) {
+      const nextTop = nextAnchor.getBoundingClientRect().top;
+      window.scrollBy(0, nextTop - anchorTop);
+    } else {
+      window.scrollTo(scrollX, scrollY);
+    }
+    requestAnimationFrame(() => {
+      const finalAnchor = viewportAnchorFor(options);
+      if (anchorTop !== null && finalAnchor) {
+        window.scrollBy(0, finalAnchor.getBoundingClientRect().top - anchorTop);
+        const rect = finalAnchor.getBoundingClientRect();
+        if (options.product && (rect.top < 120 || rect.bottom > window.innerHeight - 80)) {
+          finalAnchor.scrollIntoView({ block: "center", inline: "nearest" });
+        }
+      } else {
+        window.scrollTo(scrollX, scrollY);
+      }
+    });
   });
+}
+
+function selectAllProductLeaders() {
+  const products = state.tableProducts || [];
+  if (!products.length) return;
+  state.selectedProducts = [...new Set([...(state.selectedProducts || []), ...products])];
+  renderPreservingViewport({ selector: ".table-panel" });
 }
 
 function renderTable(rows) {
   const products = sortedProducts(rows);
   const tbody = document.querySelector("#productTable");
   const selected = selectedProductSet();
+  state.tableProducts = products.map((item) => item.product);
 
   if (!products.length) {
     tbody.replaceChildren(
@@ -3771,6 +3831,12 @@ function renderTable(rows) {
   document.querySelector("#tableCaption").textContent = `${products.length} products available under current filters.${selectedCopy}`;
   const clearButton = document.querySelector("#clearProductSelection");
   if (clearButton) clearButton.disabled = !selected.size;
+  const selectAllButton = document.querySelector("#selectVisibleProducts");
+  if (selectAllButton) {
+    const allSelected = products.length > 0 && products.every((product) => selected.has(product.product));
+    selectAllButton.disabled = !products.length || allSelected;
+    selectAllButton.textContent = allSelected ? "All selected" : "Select all";
+  }
 }
 
 function render() {
@@ -3960,6 +4026,7 @@ async function init() {
     });
     document.querySelector("#clearProductSelection")?.addEventListener("click", clearProductSelection);
     document.querySelector("#clearSelectedFocus")?.addEventListener("click", clearProductSelection);
+    document.querySelector("#selectVisibleProducts")?.addEventListener("click", selectAllProductLeaders);
     document.querySelector("#selectedProductsFocus")?.addEventListener("click", (event) => {
       const button = event.target.closest("[data-expand-chart]");
       if (!button) return;
@@ -3978,7 +4045,7 @@ async function init() {
           state.sortKey = nextKey;
           state.sortDir = nextKey === "product" ? "asc" : "desc";
         }
-        renderTable(getCurrentRows());
+        renderTable(getCurrentRows({ ignoreProductSelection: true }));
       });
     });
 
