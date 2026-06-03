@@ -583,6 +583,37 @@ function closeDrilldown() {
   document.querySelector("#drilldownPanel")?.setAttribute("aria-hidden", "true");
 }
 
+function openChartModal({ target, title, copy }) {
+  const source = document.querySelector(target);
+  const svg = source?.querySelector("svg");
+  const modal = document.querySelector("#chartModal");
+  const scrim = document.querySelector("#chartModalScrim");
+  const canvas = document.querySelector("#chartModalCanvas");
+  if (!svg || !modal || !scrim || !canvas) return;
+
+  hideTooltip();
+  document.querySelector("#chartModalTitle").textContent = title || "Chart";
+  document.querySelector("#chartModalCopy").textContent = copy || "";
+  const clone = svg.cloneNode(true);
+  clone.removeAttribute("width");
+  clone.removeAttribute("height");
+  clone.setAttribute("focusable", "false");
+  clone.classList.add("expanded-chart-svg");
+  canvas.replaceChildren(clone);
+  modal.classList.add("is-open");
+  scrim.classList.add("is-visible");
+  modal.setAttribute("aria-hidden", "false");
+  scrim.setAttribute("aria-hidden", "false");
+}
+
+function closeChartModal() {
+  document.querySelector("#chartModal")?.classList.remove("is-open");
+  document.querySelector("#chartModalScrim")?.classList.remove("is-visible");
+  document.querySelector("#chartModal")?.setAttribute("aria-hidden", "true");
+  document.querySelector("#chartModalScrim")?.setAttribute("aria-hidden", "true");
+  document.querySelector("#chartModalCanvas")?.replaceChildren();
+}
+
 function cloneData(data) {
   return JSON.parse(JSON.stringify(data));
 }
@@ -1569,6 +1600,66 @@ function drawSelectedProductWeeklyChart(rows) {
   );
 }
 
+function drawSelectedProductGapChart(rows) {
+  const svg = chartScaffold("#selectedProductGapChart", "0 0 940 560", "Selected products target attainment percentage");
+  const products = selectedProductDisplayItems(rows, 10).filter((product) => product.orders && product.cpi > 0);
+  if (!products.length) {
+    drawEmptyChart(svg, "No selected products with target price under current filters.", 470, 280);
+    return;
+  }
+
+  const rowsWithPct = products.map((product) => ({
+    ...product,
+    attainment: (product.aov / product.cpi) * 100,
+    gap: product.aov - product.cpi,
+  }));
+  const left = 300;
+  const top = 112;
+  const width = 520;
+  const rowStep = Math.min(54, Math.max(36, 350 / Math.max(rowsWithPct.length, 1)));
+  const plotHeight = Math.max(120, (rowsWithPct.length - 1) * rowStep + 46);
+  const max = Math.max(125, Math.ceil(Math.max(...rowsWithPct.map((product) => product.attainment), 100) / 25) * 25);
+
+  for (let value = 0; value <= max; value += 25) {
+    const x = left + (value / max) * width;
+    svg.append(svgEl("line", { x1: x, y1: top - 42, x2: x, y2: top + plotHeight + 10, stroke: "#efe5dc", "stroke-width": 1 }));
+    const tick = svgEl("text", { x, y: top - 52, "text-anchor": "middle", class: "tick" });
+    tick.textContent = `${value.toFixed(0)}%`;
+    svg.append(tick);
+  }
+
+  const targetX = left + (100 / max) * width;
+  svg.append(svgEl("line", { x1: targetX, y1: top - 46, x2: targetX, y2: top + plotHeight + 12, stroke: "#9a5a2e", "stroke-width": 2, "stroke-dasharray": "6 6" }));
+  const targetLabel = svgEl("text", { x: targetX + 8, y: top - 20, class: "axis-label" });
+  targetLabel.textContent = "100% target";
+  svg.append(targetLabel);
+  drawLegend(svg, [
+    { label: "Below target", color: "#f97316", width: 128 },
+    { label: "At / above target", color: "#5c8a4b", width: 150 },
+  ], left, 512, 720);
+
+  rowsWithPct.forEach((product, index) => {
+    const y = top + index * rowStep;
+    const barWidth = (product.attainment / max) * width;
+    const color = product.attainment >= 100 ? "#5c8a4b" : "#f97316";
+    const label = svgEl("text", { x: left - 16, y: y + 23, "text-anchor": "end", class: "product-axis-label" });
+    label.textContent = shortProductLabel(product.product, 34);
+    svg.append(label);
+
+    const rect = svgEl("rect", { x: left, y: y + 6, width: barWidth, height: 24, rx: 8, fill: color, opacity: product.attainment >= 100 ? 0.86 : 0.92 });
+    animateRect(rect, "x");
+    attachTooltip(rect, `<strong>${escapeHtml(product.product)}</strong><br>Target attainment ${product.attainment.toFixed(1)}%<br>Avg sold ${fmtMoney(product.aov)}<br>Target ${fmtMoney(product.cpi)}<br>Gap ${fmtMoney(product.gap)}`);
+    attachChartAction(rect, `${product.product} target attainment`, () => {
+      openDrilldown({ title: product.product, kicker: "Target attainment", rows: rows.filter((row) => row.product === product.product), criteria: { product: product.product } });
+    });
+    svg.append(rect);
+
+    const value = svgEl("text", { x: Math.min(left + width + 36, left + barWidth + 14), y: y + 24, class: "axis-label" });
+    value.textContent = `${product.attainment.toFixed(0)}% (${product.gap >= 0 ? "+" : ""}${fmtMoney(product.gap)})`;
+    svg.append(value);
+  });
+}
+
 function renderSelectedProductsFocus(rows, comparisonRows) {
   const hasSelection = Boolean(state.selectedProducts.length);
   const section = document.querySelector("#selectedProductsFocus");
@@ -1585,6 +1676,7 @@ function renderSelectedProductsFocus(rows, comparisonRows) {
   drawSelectedProductPriceChart(focusRows);
   drawSelectedProductValueChart(focusRows);
   drawSelectedProductWeeklyChart(comparisonRows);
+  drawSelectedProductGapChart(focusRows);
   return true;
 }
 
@@ -3840,8 +3932,13 @@ async function init() {
     });
     document.querySelector("#closeDrilldown").addEventListener("click", closeDrilldown);
     document.querySelector("#drawerScrim").addEventListener("click", closeDrilldown);
+    document.querySelector("#closeChartModal")?.addEventListener("click", closeChartModal);
+    document.querySelector("#chartModalScrim")?.addEventListener("click", closeChartModal);
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeDrilldown();
+      if (event.key === "Escape") {
+        closeDrilldown();
+        closeChartModal();
+      }
     });
     document.querySelector("#resetFilters").addEventListener("click", () => {
       state.week = "all";
@@ -3863,6 +3960,15 @@ async function init() {
     });
     document.querySelector("#clearProductSelection")?.addEventListener("click", clearProductSelection);
     document.querySelector("#clearSelectedFocus")?.addEventListener("click", clearProductSelection);
+    document.querySelector("#selectedProductsFocus")?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-expand-chart]");
+      if (!button) return;
+      openChartModal({
+        target: button.dataset.expandChart,
+        title: button.dataset.chartTitle,
+        copy: button.dataset.chartCopy,
+      });
+    });
     document.querySelectorAll(".sort-button").forEach((button) => {
       button.addEventListener("click", () => {
         const nextKey = button.dataset.sort;

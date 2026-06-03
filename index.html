@@ -163,6 +163,7 @@
                   <h3>Sold Price vs Target Price</h3>
                   <p>Average sold price and target price for selected products.</p>
                 </div>
+                <button class="chart-expand-button" type="button" data-expand-chart="#selectedProductPriceChart" data-chart-title="Sold Price vs Target Price" data-chart-copy="Average sold price and target price for selected products.">View large</button>
               </div>
               <div class="chart selected-chart" id="selectedProductPriceChart" role="img" aria-label="Selected product sold price and target price chart"></div>
             </article>
@@ -173,6 +174,7 @@
                   <h3>GMV vs Target Cost</h3>
                   <p>Selected product GMV compared with estimated target cost.</p>
                 </div>
+                <button class="chart-expand-button" type="button" data-expand-chart="#selectedProductValueChart" data-chart-title="GMV vs Target Cost" data-chart-copy="Selected product GMV compared with estimated target cost.">View large</button>
               </div>
               <div class="chart selected-chart" id="selectedProductValueChart" role="img" aria-label="Selected product GMV and target cost chart"></div>
             </article>
@@ -183,8 +185,20 @@
                   <h3>Selected Product Weekly GMV</h3>
                   <p>Weekly GMV split for the selected product set.</p>
                 </div>
+                <button class="chart-expand-button" type="button" data-expand-chart="#selectedProductWeeklyChart" data-chart-title="Selected Product Weekly GMV" data-chart-copy="Weekly GMV split for the selected product set.">View large</button>
               </div>
               <div class="chart selected-chart" id="selectedProductWeeklyChart" role="img" aria-label="Selected product weekly GMV chart"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Target Attainment %</h3>
+                  <p>Sold price as a percent of target price for selected products.</p>
+                </div>
+                <button class="chart-expand-button" type="button" data-expand-chart="#selectedProductGapChart" data-chart-title="Target Attainment %" data-chart-copy="Sold price as a percent of target price for selected products.">View large</button>
+              </div>
+              <div class="chart selected-chart" id="selectedProductGapChart" role="img" aria-label="Selected product target attainment chart"></div>
             </article>
           </div>
         </section>
@@ -465,6 +479,20 @@
       <div class="drilldown-body" id="drilldownBody"></div>
     </aside>
     <div class="drawer-scrim" id="drawerScrim" aria-hidden="true"></div>
+    <div class="chart-modal-scrim" id="chartModalScrim" aria-hidden="true"></div>
+    <section class="chart-modal" id="chartModal" aria-hidden="true" aria-labelledby="chartModalTitle">
+      <div class="chart-modal-head">
+        <div>
+          <span>Expanded chart</span>
+          <h2 id="chartModalTitle">Chart</h2>
+          <p id="chartModalCopy"></p>
+        </div>
+        <button id="closeChartModal" type="button" aria-label="Close expanded chart">×</button>
+      </div>
+      <div class="chart-modal-body">
+        <div class="chart-modal-canvas" id="chartModalCanvas"></div>
+      </div>
+    </section>
     <div class="tooltip" id="tooltip" role="tooltip"></div>
     <script src="./data.js"></script>
     <script src="./app.js"></script>
