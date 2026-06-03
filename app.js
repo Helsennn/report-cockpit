@@ -1516,7 +1516,7 @@ function drawSelectedProductPriceChart(rows) {
 function drawSelectedProductValueChart(rows) {
   const products = selectedProductChartItems(rows);
   const chartHeight = selectedProductChartHeight(products.length);
-  const svg = chartScaffold("#selectedProductValueChart", `0 0 940 ${chartHeight}`, "Selected products GMV versus estimated target cost");
+  const svg = chartScaffold("#selectedProductValueChart", `0 0 940 ${chartHeight}`, "Selected products GMV contribution and order volume");
   if (!products.length) {
     drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
     return;
@@ -1527,36 +1527,41 @@ function drawSelectedProductValueChart(rows) {
   const rowStep = 44;
   const plotHeight = Math.max(360, products.length * rowStep + 8);
   const legendY = top + plotHeight + 58;
-  const max = niceMoneyMax(Math.max(...products.flatMap((product) => [product.gmv, product.targetCost]), 1));
+  const totalGmv = products.reduce((sum, product) => sum + product.gmv, 0);
+  const maxOrders = Math.max(...products.map((product) => product.orders), 1);
+  const max = niceMoneyMax(Math.max(...products.map((product) => product.gmv), 1));
   drawHorizontalGrid(svg, left, top - 8, width, plotHeight + 18, 4, max, fmtMoney);
   drawLegend(svg, [
-    { label: "GMV", color: "#f97316", width: 82 },
-    { label: "Est. target cost", color: "#477f9c", width: 142 },
+    { label: "GMV contribution", color: "#f97316", width: 158 },
+    { label: "Order marker", color: "#477f9c", width: 138 },
   ], left, legendY, 720);
 
   products.forEach((product, index) => {
     const y = top + index * rowStep;
     const gmvWidth = (product.gmv / max) * width;
-    const costWidth = (product.targetCost / max) * width;
+    const orderX = left + (product.orders / maxOrders) * width;
+    const share = totalGmv ? (product.gmv / totalGmv) * 100 : 0;
     const label = svgEl("text", { x: left - 16, y: y + 27, "text-anchor": "end", class: "product-axis-label" });
     label.textContent = shortProductLabel(product.product, 34);
     svg.append(label);
 
-    const cost = svgEl("rect", { x: left, y: y + 4, width: costWidth, height: 15, rx: 6, fill: "#477f9c", opacity: 0.72 });
-    animateRect(cost, "x");
-    attachTooltip(cost, `<strong>${escapeHtml(product.product)}</strong><br>Est. target cost ${fmtMoney(product.targetCost)}<br>Target price ${fmtMoney(product.cpi)}`);
-    svg.append(cost);
-
-    const gmv = svgEl("rect", { x: left, y: y + 26, width: gmvWidth, height: 15, rx: 6, fill: "#f97316" });
+    const gmv = svgEl("rect", { x: left, y: y + 11, width: gmvWidth, height: 20, rx: 7, fill: "#f97316" });
     animateRect(gmv, "x");
-    attachTooltip(gmv, `<strong>${escapeHtml(product.product)}</strong><br>GMV ${fmtMoney(product.gmv)}<br>Orders ${fmtNum(product.orders)}<br>Buyers ${fmtNum(product.buyers)}`);
-    attachChartAction(gmv, `${product.product} GMV comparison`, () => {
-      openDrilldown({ title: product.product, kicker: "Selected product value", rows: rows.filter((row) => row.product === product.product), criteria: { product: product.product } });
+    attachTooltip(gmv, `<strong>${escapeHtml(product.product)}</strong><br>GMV ${fmtMoney(product.gmv)}<br>Share ${share.toFixed(1)}%<br>Orders ${fmtNum(product.orders)}<br>Buyers ${fmtNum(product.buyers)}`);
+    attachChartAction(gmv, `${product.product} GMV contribution`, () => {
+      openDrilldown({ title: product.product, kicker: "Selected product contribution", rows: rows.filter((row) => row.product === product.product), criteria: { product: product.product } });
     });
     svg.append(gmv);
 
+    const orderMarker = svgEl("circle", { cx: orderX, cy: y + 21, r: 7, fill: "#477f9c", stroke: "#fffaf4", "stroke-width": 3 });
+    attachTooltip(orderMarker, `<strong>${escapeHtml(product.product)}</strong><br>Orders ${fmtNum(product.orders)}<br>GMV ${fmtMoney(product.gmv)}<br>Share ${share.toFixed(1)}%`);
+    attachChartAction(orderMarker, `${product.product} order volume`, () => {
+      openDrilldown({ title: product.product, kicker: "Selected product orders", rows: rows.filter((row) => row.product === product.product), criteria: { product: product.product } });
+    });
+    svg.append(orderMarker);
+
     const value = svgEl("text", { x: 900, y: y + 33, "text-anchor": "end", class: "chart-title-note" });
-    value.textContent = `${fmtMoney(product.gmv)} / ${fmtMoney(product.targetCost)}`;
+    value.textContent = `${fmtMoney(product.gmv)} · ${fmtNum(product.orders)} orders · ${share.toFixed(1)}%`;
     svg.append(value);
   });
 }
