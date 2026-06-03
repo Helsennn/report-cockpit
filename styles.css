@@ -1509,7 +1509,11 @@ th {
 
 .sort-button {
   all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 38px;
+  box-sizing: border-box;
   cursor: pointer;
   border-radius: 8px;
   color: var(--muted);
@@ -1546,11 +1550,33 @@ th {
   text-align: center;
 }
 
+.product-leaders-table th {
+  vertical-align: middle;
+}
+
 .product-leaders-table th:nth-child(2),
 .product-leaders-table td:nth-child(2) {
   width: 38%;
   text-align: left;
   white-space: normal;
+}
+
+.product-leaders-table .sort-button,
+.table-head-label {
+  min-height: 38px;
+  line-height: 1;
+}
+
+.table-head-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 8px;
+  color: var(--muted);
+  padding: 6px 8px;
+  font: inherit;
+  font-weight: 750;
 }
 
 .product-leaders-table th:not(:first-child):not(:nth-child(2)),
