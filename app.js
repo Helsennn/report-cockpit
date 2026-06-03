@@ -1417,8 +1417,20 @@ function selectedProductMetrics(rows) {
     .sort((a, b) => b.gmv - a.gmv || b.orders - a.orders || collator.compare(a.product, b.product));
 }
 
-function selectedProductDisplayItems(rows, limit = 10) {
-  return selectedProductMetrics(rows).slice(0, limit);
+function selectedProductDisplayItems(rows, limit = Infinity) {
+  const products = selectedProductMetrics(rows);
+  return Number.isFinite(limit) ? products.slice(0, limit) : products;
+}
+
+function selectedProductChartItems(rows, options = {}) {
+  const { requireTarget = false } = options;
+  return selectedProductDisplayItems(rows)
+    .filter((product) => product.orders > 0)
+    .filter((product) => !requireTarget || product.cpi > 0);
+}
+
+function selectedProductChartHeight(count) {
+  return Math.max(560, 190 + count * 44);
 }
 
 function niceMoneyMax(value) {
@@ -1454,23 +1466,25 @@ function renderSelectedProductSummary(rows) {
 }
 
 function drawSelectedProductPriceChart(rows) {
-  const svg = chartScaffold("#selectedProductPriceChart", "0 0 940 560", "Selected products average sold price versus target price");
-  const products = selectedProductDisplayItems(rows, 8);
-  if (!products.length || !products.some((product) => product.orders)) {
+  const products = selectedProductChartItems(rows);
+  const chartHeight = selectedProductChartHeight(products.length);
+  const svg = chartScaffold("#selectedProductPriceChart", `0 0 940 ${chartHeight}`, "Selected products average sold price versus target price");
+  if (!products.length) {
     drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
     return;
   }
   const left = 312;
   const top = 96;
-  const width = 510;
-  const plotHeight = 360;
-  const rowStep = Math.min(48, plotHeight / Math.max(products.length, 1));
+  const width = 420;
+  const rowStep = 44;
+  const plotHeight = Math.max(360, products.length * rowStep + 8);
+  const legendY = top + plotHeight + 58;
   const max = niceMoneyMax(Math.max(...products.flatMap((product) => [product.aov, product.cpi]), 1));
   drawHorizontalGrid(svg, left, top - 8, width, plotHeight + 18, 4, max, fmtMoney);
   drawLegend(svg, [
     { label: "Avg sold price", color: "#f97316", width: 142 },
     { label: "Target price", color: "#9a5a2e", width: 120 },
-  ], left, 512, 720);
+  ], left, legendY, 720);
 
   products.forEach((product, index) => {
     const y = top + index * rowStep;
@@ -1493,31 +1507,32 @@ function drawSelectedProductPriceChart(rows) {
     });
     svg.append(sold);
 
-    const valueX = Math.min(left + width + 56, left + Math.max(soldWidth, targetWidth) + 12);
-    const value = svgEl("text", { x: valueX, y: y + 33, class: "chart-title-note" });
+    const value = svgEl("text", { x: 900, y: y + 33, "text-anchor": "end", class: "chart-title-note" });
     value.textContent = `${fmtMoney(product.aov)} / ${fmtMoney(product.cpi)}`;
     svg.append(value);
   });
 }
 
 function drawSelectedProductValueChart(rows) {
-  const svg = chartScaffold("#selectedProductValueChart", "0 0 940 560", "Selected products GMV versus estimated target cost");
-  const products = selectedProductDisplayItems(rows, 8);
-  if (!products.length || !products.some((product) => product.orders)) {
+  const products = selectedProductChartItems(rows);
+  const chartHeight = selectedProductChartHeight(products.length);
+  const svg = chartScaffold("#selectedProductValueChart", `0 0 940 ${chartHeight}`, "Selected products GMV versus estimated target cost");
+  if (!products.length) {
     drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
     return;
   }
   const left = 312;
   const top = 96;
-  const width = 510;
-  const plotHeight = 360;
-  const rowStep = Math.min(48, plotHeight / Math.max(products.length, 1));
+  const width = 420;
+  const rowStep = 44;
+  const plotHeight = Math.max(360, products.length * rowStep + 8);
+  const legendY = top + plotHeight + 58;
   const max = niceMoneyMax(Math.max(...products.flatMap((product) => [product.gmv, product.targetCost]), 1));
   drawHorizontalGrid(svg, left, top - 8, width, plotHeight + 18, 4, max, fmtMoney);
   drawLegend(svg, [
     { label: "GMV", color: "#f97316", width: 82 },
     { label: "Est. target cost", color: "#477f9c", width: 142 },
-  ], left, 512, 720);
+  ], left, legendY, 720);
 
   products.forEach((product, index) => {
     const y = top + index * rowStep;
@@ -1540,74 +1555,98 @@ function drawSelectedProductValueChart(rows) {
     });
     svg.append(gmv);
 
-    const valueX = Math.min(left + width + 56, left + Math.max(gmvWidth, costWidth) + 12);
-    const value = svgEl("text", { x: valueX, y: y + 33, class: "chart-title-note" });
+    const value = svgEl("text", { x: 900, y: y + 33, "text-anchor": "end", class: "chart-title-note" });
     value.textContent = `${fmtMoney(product.gmv)} / ${fmtMoney(product.targetCost)}`;
     svg.append(value);
   });
 }
 
 function drawSelectedProductWeeklyChart(rows) {
-  const svg = chartScaffold("#selectedProductWeeklyChart", "0 0 940 560", "Selected products weekly GMV split");
-  const products = selectedProductDisplayItems(rows, 6).filter((product) => product.orders);
+  const products = selectedProductChartItems(rows);
+  const rowStep = 38;
+  const top = 92;
+  const chartHeight = Math.max(560, top + products.length * rowStep + 96);
+  const svg = chartScaffold("#selectedProductWeeklyChart", `0 0 940 ${chartHeight}`, "Selected products weekly GMV split");
   if (!products.length) {
     drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
     return;
   }
-  const productNames = products.map((product) => product.product);
   const weeks = activeWeekLabels();
-  const data = weeks.map((week) => {
+  if (!weeks.length) {
+    drawEmptyChart(svg, "No weekly rows under current filters.", 470, 280);
+    return;
+  }
+  const weekProductMaps = new Map(weeks.map((week) => {
     const weekRows = rows.filter((row) => row.week === week);
-    const productMap = new Map(aggregateProducts(weekRows).map((item) => [item.product, item]));
-    const segments = productNames.map((product, index) => ({
-      product,
-      color: selectedProductColors[index % selectedProductColors.length],
-      gmv: productMap.get(product)?.gmv || 0,
-      orders: productMap.get(product)?.orders || 0,
-    }));
-    return { week, total: segments.reduce((sum, segment) => sum + segment.gmv, 0), segments };
+    return [week, new Map(aggregateProducts(weekRows).map((item) => [item.product, item]))];
+  }));
+  const left = 304;
+  const weekWidth = 118;
+  const barMax = 82;
+  const plotHeight = products.length * rowStep + 12;
+  const totalX = left + weeks.length * weekWidth + 26;
+  const max = niceMoneyMax(Math.max(
+    ...products.flatMap((product) => weeks.map((week) => weekProductMaps.get(week)?.get(product.product)?.gmv || 0)),
+    1,
+  ));
+
+  const header = svgEl("text", { x: left - 16, y: top - 36, "text-anchor": "end", class: "axis-label" });
+  header.textContent = "Product";
+  svg.append(header);
+  weeks.forEach((week, index) => {
+    const x = left + index * weekWidth;
+    svg.append(svgEl("line", { x1: x, y1: top - 52, x2: x, y2: top + plotHeight, stroke: "#efe5dc", "stroke-width": 1 }));
+    const label = svgEl("text", { x: x + barMax / 2, y: top - 36, "text-anchor": "middle", class: "axis-label" });
+    label.textContent = week;
+    svg.append(label);
   });
-  const left = 94;
-  const top = 54;
-  const width = 760;
-  const height = 310;
-  const max = niceMoneyMax(Math.max(...data.map((week) => week.total), 1));
-  drawGrid(svg, left, top, width, height, 4, max, fmtMoney);
-  const barW = Math.min(86, width / Math.max(data.length, 1) - 26);
-  data.forEach((week, index) => {
-    const x = left + (width * (index + 0.5)) / data.length - barW / 2;
-    let yCursor = top + height;
-    week.segments.forEach((segment) => {
-      const h = (segment.gmv / max) * height;
-      if (h <= 0) return;
-      yCursor -= h;
-      const rect = svgEl("rect", { x, y: yCursor, width: barW, height: h, rx: h > 16 ? 7 : 3, fill: segment.color });
-      animateRect(rect);
-      attachTooltip(rect, `<strong>${escapeHtml(week.week)}</strong><br>${escapeHtml(segment.product)}<br>GMV ${fmtMoney(segment.gmv)}<br>Orders ${fmtNum(segment.orders)}`);
-      attachChartAction(rect, `${week.week} ${segment.product}`, () => {
-        openDrilldown({ title: segment.product, kicker: week.week, rows: rows.filter((row) => row.week === week.week && row.product === segment.product), criteria: { week: week.week, product: segment.product } });
+  svg.append(svgEl("line", { x1: left + weeks.length * weekWidth, y1: top - 52, x2: left + weeks.length * weekWidth, y2: top + plotHeight, stroke: "#efe5dc", "stroke-width": 1 }));
+  const totalHeader = svgEl("text", { x: totalX, y: top - 36, class: "axis-label" });
+  totalHeader.textContent = "Total";
+  svg.append(totalHeader);
+
+  products.forEach((product, productIndex) => {
+    const y = top + productIndex * rowStep;
+    svg.append(svgEl("line", { x1: 52, y1: y + rowStep - 3, x2: 900, y2: y + rowStep - 3, stroke: "#f5eadf", "stroke-width": 1 }));
+    const label = svgEl("text", { x: left - 16, y: y + 22, "text-anchor": "end", class: "product-axis-label" });
+    label.textContent = shortProductLabel(product.product, 34);
+    svg.append(label);
+
+    weeks.forEach((week, weekIndex) => {
+      const cell = weekProductMaps.get(week)?.get(product.product);
+      const gmv = cell?.gmv || 0;
+      const orders = cell?.orders || 0;
+      const x = left + weekIndex * weekWidth + 10;
+      const barWidth = (gmv / max) * barMax;
+      if (gmv <= 0) {
+        svg.append(svgEl("line", { x1: x, y1: y + 17, x2: x + 18, y2: y + 17, stroke: "#ead8c6", "stroke-width": 3, "stroke-linecap": "round" }));
+        return;
+      }
+      const rect = svgEl("rect", { x, y: y + 8, width: barWidth, height: 18, rx: 6, fill: selectedProductColors[weekIndex % selectedProductColors.length] });
+      animateRect(rect, "x");
+      attachTooltip(rect, `<strong>${escapeHtml(week)}</strong><br>${escapeHtml(product.product)}<br>GMV ${fmtMoney(gmv)}<br>Orders ${fmtNum(orders)}`);
+      attachChartAction(rect, `${week} ${product.product}`, () => {
+        openDrilldown({ title: product.product, kicker: week, rows: rows.filter((row) => row.week === week && row.product === product.product), criteria: { week, product: product.product } });
       });
       svg.append(rect);
+
+      if (products.length <= 12) {
+        const value = svgEl("text", { x: x + Math.min(barWidth + 6, barMax + 6), y: y + 23, class: "chart-title-note" });
+        value.textContent = fmtMoney(gmv);
+        svg.append(value);
+      }
     });
-    const label = svgEl("text", { x: x + barW / 2, y: top + height + 31, "text-anchor": "middle", class: "axis-label" });
-    label.textContent = week.week;
-    svg.append(label);
-    const value = svgEl("text", { x: x + barW / 2, y: top + height + 52, "text-anchor": "middle", class: "chart-title-note" });
-    value.textContent = fmtMoney(week.total);
-    svg.append(value);
+
+    const total = svgEl("text", { x: totalX, y: y + 22, class: "axis-label" });
+    total.textContent = fmtMoney(product.gmv);
+    svg.append(total);
   });
-  drawLegend(
-    svg,
-    products.map((product, index) => ({ label: shortProductLabel(product.product, 18), color: selectedProductColors[index % selectedProductColors.length], width: 150 })),
-    left,
-    462,
-    760,
-  );
 }
 
 function drawSelectedProductGapChart(rows) {
-  const svg = chartScaffold("#selectedProductGapChart", "0 0 940 560", "Selected products target attainment percentage");
-  const products = selectedProductDisplayItems(rows, 8).filter((product) => product.orders && product.cpi > 0);
+  const products = selectedProductChartItems(rows, { requireTarget: true });
+  const chartHeight = selectedProductChartHeight(products.length);
+  const svg = chartScaffold("#selectedProductGapChart", `0 0 940 ${chartHeight}`, "Selected products target attainment percentage");
   if (!products.length) {
     drawEmptyChart(svg, "No selected products with target price under current filters.", 470, 280);
     return;
@@ -1620,9 +1659,10 @@ function drawSelectedProductGapChart(rows) {
   }));
   const left = 300;
   const top = 112;
-  const width = 520;
-  const rowStep = Math.min(54, Math.max(36, 350 / Math.max(rowsWithPct.length, 1)));
-  const plotHeight = Math.max(120, (rowsWithPct.length - 1) * rowStep + 46);
+  const width = 440;
+  const rowStep = 42;
+  const plotHeight = Math.max(360, rowsWithPct.length * rowStep + 8);
+  const legendY = top + plotHeight + 58;
   const max = Math.max(125, Math.ceil(Math.max(...rowsWithPct.map((product) => product.attainment), 100) / 25) * 25);
 
   for (let value = 0; value <= max; value += 25) {
@@ -1641,7 +1681,7 @@ function drawSelectedProductGapChart(rows) {
   drawLegend(svg, [
     { label: "Below target", color: "#f97316", width: 128 },
     { label: "At / above target", color: "#5c8a4b", width: 150 },
-  ], left, 512, 720);
+  ], left, legendY, 720);
 
   rowsWithPct.forEach((product, index) => {
     const y = top + index * rowStep;
@@ -1659,7 +1699,7 @@ function drawSelectedProductGapChart(rows) {
     });
     svg.append(rect);
 
-    const value = svgEl("text", { x: Math.min(left + width + 36, left + barWidth + 14), y: y + 24, class: "axis-label" });
+    const value = svgEl("text", { x: 900, y: y + 24, "text-anchor": "end", class: "axis-label" });
     value.textContent = `${product.attainment.toFixed(0)}% (${product.gap >= 0 ? "+" : ""}${fmtMoney(product.gap)})`;
     svg.append(value);
   });
@@ -1676,6 +1716,8 @@ function renderSelectedProductsFocus(rows, comparisonRows) {
   if (!hasSelection) return false;
 
   const focusRows = state.week === "all" ? comparisonRows : rows;
+  const activeProductCount = selectedProductMetrics(focusRows).filter((product) => product.orders).length;
+  section.classList.toggle("has-many-products", activeProductCount > 12);
   document.querySelector("#selectedProductsEyebrow").textContent = `${fmtNum(state.selectedProducts.length)} selected · ${state.week === "all" ? "rolling scope" : state.week}`;
   renderSelectedProductSummary(focusRows);
   drawSelectedProductPriceChart(focusRows);

@@ -1006,8 +1006,23 @@ button {
   grid-column: 1 / -1;
 }
 
+.selected-products-focus.has-many-products .selected-product-grid {
+  grid-template-columns: 1fr;
+}
+
 .selected-chart {
-  min-height: 500px;
+  height: 520px;
+  min-height: 520px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.chart.selected-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 900px;
+  height: auto;
+  min-height: 100%;
 }
 
 .chart-expand-button {
@@ -2148,7 +2163,8 @@ th {
   }
 
   .selected-chart {
-    min-height: 440px;
+    height: 460px;
+    min-height: 460px;
   }
 
   .chart-modal {
