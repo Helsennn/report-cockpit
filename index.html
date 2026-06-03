@@ -147,6 +147,48 @@
           </div>
         </div>
 
+        <section class="selected-products-focus" id="selectedProductsFocus" aria-label="Selected products comparison" hidden>
+          <div class="section-head">
+            <div>
+              <p class="eyebrow" id="selectedProductsEyebrow">Selected products</p>
+              <h3>Selected Products Focus</h3>
+            </div>
+            <button id="clearSelectedFocus" type="button">Clear selected</button>
+          </div>
+          <div class="range-summary-grid selected-product-summary" id="selectedProductSummary" aria-label="Selected products summary"></div>
+          <div class="chart-grid selected-product-grid">
+            <article class="panel wide">
+              <div class="panel-head">
+                <div>
+                  <h3>Sold Price vs Target Price</h3>
+                  <p>Average sold price and target price for selected products.</p>
+                </div>
+              </div>
+              <div class="chart selected-chart" id="selectedProductPriceChart" role="img" aria-label="Selected product sold price and target price chart"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>GMV vs Target Cost</h3>
+                  <p>Selected product GMV compared with estimated target cost.</p>
+                </div>
+              </div>
+              <div class="chart selected-chart" id="selectedProductValueChart" role="img" aria-label="Selected product GMV and target cost chart"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <h3>Selected Product Weekly GMV</h3>
+                  <p>Weekly GMV split for the selected product set.</p>
+                </div>
+              </div>
+              <div class="chart selected-chart" id="selectedProductWeeklyChart" role="img" aria-label="Selected product weekly GMV chart"></div>
+            </article>
+          </div>
+        </section>
+
         <section class="analysis-stage" data-stage-mode="split" aria-label="Selected date range and rolling four week comparison">
           <section class="inweek-section" aria-label="In-week selected day analysis">
             <div class="section-head">

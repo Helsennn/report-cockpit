@@ -536,11 +536,18 @@ function normalizeHeader(value) {
 }
 
 function readCsvField(row, names) {
+  const match = readCsvFieldMatch(row, names);
+  return match ? match.value : "";
+}
+
+function readCsvFieldMatch(row, names) {
   for (const name of names) {
     const value = row[normalizeHeader(name)];
-    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return { name, value };
+    }
   }
-  return "";
+  return null;
 }
 
 function parseNumber(value) {
@@ -578,34 +585,101 @@ function buyerMatchKeys(row) {
   return buyer === anon ? [buyer] : [buyer, anon];
 }
 
-function parseDateValue(value) {
+function validDateParts(year, month, day, hour = 0, minute = 0, second = 0) {
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return null;
+  }
+  const date = new Date(year, month - 1, day, hour, minute, second);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
+}
+
+function dashboardYear() {
+  const latestStart = state.baseData?.weeks?.at(-1)?.start || state.data?.weeks?.at(-1)?.start;
+  return latestStart ? Number(String(latestStart).slice(0, 4)) : new Date().getFullYear();
+}
+
+function parseDateValue(value, options = {}) {
   const text = String(value || "").trim();
   if (!text) return null;
+  const defaultYear = options.defaultYear || null;
+  const dateOnlyHour = options.dateOnlyHour ?? 12;
 
   const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/);
   if (iso) {
-    return new Date(
+    return validDateParts(
       Number(iso[1]),
-      Number(iso[2]) - 1,
+      Number(iso[2]),
       Number(iso[3]),
-      Number(iso[4] || 0),
+      iso[4] === undefined ? dateOnlyHour : Number(iso[4]),
       Number(iso[5] || 0),
       Number(iso[6] || 0),
     );
   }
 
-  const slash = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  const slash = text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?:[,\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
   if (slash) {
     let hour = Number(slash[4] || 0);
     const meridiem = String(slash[7] || "").toUpperCase();
     if (meridiem === "PM" && hour < 12) hour += 12;
     if (meridiem === "AM" && hour === 12) hour = 0;
-    const year = Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3]);
-    return new Date(year, Number(slash[1]) - 1, Number(slash[2]), hour, Number(slash[5] || 0), Number(slash[6] || 0));
+    const year = slash[3] ? Number(slash[3].length === 2 ? `20${slash[3]}` : slash[3]) : defaultYear;
+    return validDateParts(year, Number(slash[1]), Number(slash[2]), slash[4] === undefined ? dateOnlyHour : hour, Number(slash[5] || 0), Number(slash[6] || 0));
   }
 
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  const dotted = text.match(/^(\d{1,2})[.-](\d{1,2})(?:[.-](\d{2,4}))?(?:[,\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if (dotted) {
+    let hour = Number(dotted[4] || 0);
+    const meridiem = String(dotted[7] || "").toUpperCase();
+    if (meridiem === "PM" && hour < 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    const year = dotted[3] ? Number(dotted[3].length === 2 ? `20${dotted[3]}` : dotted[3]) : defaultYear;
+    return validDateParts(year, Number(dotted[1]), Number(dotted[2]), dotted[4] === undefined ? dateOnlyHour : hour, Number(dotted[5] || 0), Number(dotted[6] || 0));
+  }
+
+  const named = text.match(/^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{2,4})(?:[,\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if (named) {
+    const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    let hour = Number(named[4] || 0);
+    const meridiem = String(named[7] || "").toUpperCase();
+    if (meridiem === "PM" && hour < 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+    const year = Number(named[3].length === 2 ? `20${named[3]}` : named[3]);
+    return validDateParts(year, months.indexOf(named[1].slice(0, 3).toLowerCase()) + 1, Number(named[2]), named[4] === undefined ? dateOnlyHour : hour, Number(named[5] || 0), Number(named[6] || 0));
+  }
+
+  return null;
+}
+
+function parseDateFromSourceName(sourceFile) {
+  const text = String(sourceFile || "");
+  const yearFirst = text.match(/(?:^|[^\d])(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})(?=$|[^\d])/);
+  if (yearFirst) return validDateParts(Number(yearFirst[1]), Number(yearFirst[2]), Number(yearFirst[3]), 12);
+  const monthFirst = text.match(/(?:^|[^\d])(\d{1,2})[.-](\d{1,2})(?:[.-](\d{2,4}))?(?=$|[^\d])/);
+  if (!monthFirst) return null;
+  const year = monthFirst[3] ? Number(monthFirst[3].length === 2 ? `20${monthFirst[3]}` : monthFirst[3]) : dashboardYear();
+  return validDateParts(year, Number(monthFirst[1]), Number(monthFirst[2]), 12);
+}
+
+function resolveCsvOrderDate(row, sourceFile) {
+  const explicitDate = readCsvFieldMatch(row, [
+    "placed_at",
+    "sold_at",
+    "paid_at",
+    "purchased_at",
+    "created_at",
+    "order_date",
+    "order_created_at",
+    "timestamp",
+  ]);
+  const explicitParsed = explicitDate ? parseDateValue(explicitDate.value, { defaultYear: dashboardYear() }) : null;
+  if (explicitParsed) return explicitParsed;
+
+  const fileDate = parseDateFromSourceName(sourceFile);
+  const genericDate = readCsvFieldMatch(row, ["date"]);
+  const genericParsed = genericDate ? parseDateValue(genericDate.value, { defaultYear: dashboardYear() }) : null;
+
+  if (fileDate && genericParsed && Math.abs(genericParsed - fileDate) > 6 * 24 * 60 * 60 * 1000) return fileDate;
+  return genericParsed || fileDate;
 }
 
 function isoDate(date) {
@@ -713,7 +787,7 @@ function csvToObjects(text) {
 
 function normalizeCsvOrder(row, sourceFile) {
   if (!activeCsvStatus(readCsvField(row, ["cancelled_or_failed", "status", "order_status"]))) return null;
-  const placedAt = parseDateValue(readCsvField(row, ["placed_at", "sold_at", "created_at", "order_date", "date", "timestamp"]));
+  const placedAt = resolveCsvOrderDate(row, sourceFile);
   if (!placedAt) return null;
 
   const price = parseNumber(readCsvField(row, ["original_item_price", "sold_price", "price", "item_price", "amount", "gmv"]));
@@ -843,6 +917,10 @@ function buildWeeks(baseData, records) {
   return [...weeks.values()].sort((a, b) => a.start.localeCompare(b.start));
 }
 
+function isUploadedRow(row) {
+  return row.source === "csv_upload" || row.source === "csv_rollup";
+}
+
 function applyBuyerTypes(records, weeks) {
   const weekStarts = new Map(weeks.map((week) => [week.label, week.start]));
   const basePriorBuyers = new Set(
@@ -862,10 +940,21 @@ function applyBuyerTypes(records, weeks) {
   });
 
   records.forEach((row) => {
-    if (row.source !== "csv_upload") return;
+    if (!isUploadedRow(row)) return;
     const prior = buyersByEarlierWeek.get(row.week);
     row.buyer_type = buyerMatchKeys(row).some((key) => prior?.has(key)) ? "returning" : "new";
   });
+}
+
+function classifyUploadedRowsForStorage() {
+  if (!state.uploadedRows.length || !state.baseData) return;
+  const baseData = cloneData(state.baseData);
+  const uploadedDates = new Set(state.uploadedRows.map((row) => row.broadcast_date || row.date));
+  const baseRecords = state.uploadedReplaceDates
+    ? baseData.records.filter((row) => !uploadedDates.has(row.broadcast_date || row.date))
+    : baseData.records.slice();
+  const records = [...baseRecords, ...state.uploadedRows];
+  applyBuyerTypes(records, buildWeeks(baseData, records));
 }
 
 function rebuildDataWithUploads() {
@@ -922,7 +1011,7 @@ function rebuildDataWithUploads() {
     else week.wow_gmv_pct = oldWeekly.get(week.week)?.wow_gmv_pct ?? null;
   });
 
-  const latestWeek = weekly.at(-1)?.week || baseData.latest_week;
+  const latestWeek = [...weekly].reverse().find((week) => week.orders || week.gmv || week.buyers)?.week || weekly.at(-1)?.week || baseData.latest_week;
   const latestRows = records.filter((row) => row.week === latestWeek);
   const daily = [...new Set(latestRows.map((row) => row.broadcast_date || row.date))]
     .sort()
@@ -972,6 +1061,7 @@ function saveUploads() {
       localStorage.removeItem(uploadStorageKey);
       return;
     }
+    classifyUploadedRowsForStorage();
     const rollupRows = rollupUploadedRows(state.uploadedRows);
     localStorage.setItem(uploadStorageKey, JSON.stringify({
       version: 2,
@@ -992,6 +1082,7 @@ function loadUploads() {
     state.uploadedRows = restoredRows;
     state.uploadedWeekHours = saved.weekHours || (saved.version === 2 ? {} : weekHoursFromRows(saved.rows));
     state.uploadedReplaceDates = saved.replaceDates ?? saved.replaceWeeks ?? true;
+    classifyUploadedRowsForStorage();
     document.querySelector("#replaceDatesToggle").checked = state.uploadedReplaceDates;
     updateUploadStatus(`${uploadedOrdersCount().toLocaleString()} summarized uploaded orders restored from this browser. Raw CSV rows are not stored.`);
     if (saved.version !== 2) saveUploads();
@@ -1212,6 +1303,232 @@ function aggregateProducts(rows) {
   }));
 }
 
+const selectedProductColors = ["#f97316", "#9a5a2e", "#477f9c", "#5c8a4b", "#dc5b42", "#89577b", "#f59e0b"];
+
+function shortProductLabel(value, max = 34) {
+  const text = String(value || "");
+  return text.length > max ? `${text.slice(0, max - 1)}...` : text;
+}
+
+function selectedProductMetrics(rows) {
+  const selected = state.selectedProducts || [];
+  const aggregated = new Map(aggregateProducts(rows).map((item) => [item.product, item]));
+  return selected
+    .map((product) => aggregated.get(product) || {
+      product,
+      gmv: 0,
+      orders: 0,
+      buyers: 0,
+      aov: 0,
+      cpi: 0,
+      targetCost: 0,
+    })
+    .sort((a, b) => b.gmv - a.gmv || b.orders - a.orders || collator.compare(a.product, b.product));
+}
+
+function selectedProductDisplayItems(rows, limit = 10) {
+  return selectedProductMetrics(rows).slice(0, limit);
+}
+
+function niceMoneyMax(value) {
+  if (!value || value <= 0) return 1;
+  if (value <= 10) return Math.ceil(value);
+  if (value <= 100) return Math.ceil(value / 10) * 10;
+  if (value <= 1000) return Math.ceil(value / 100) * 100;
+  return Math.ceil(value / 1000) * 1000;
+}
+
+function renderSelectedProductSummary(rows) {
+  const host = document.querySelector("#selectedProductSummary");
+  if (!host) return;
+  const metrics = aggregateRows(rows);
+  const products = selectedProductMetrics(rows);
+  const targetCost = products.reduce((sum, product) => sum + product.targetCost, 0);
+  const avgTarget = metrics.orders ? targetCost / metrics.orders : 0;
+  const gap = metrics.aov - avgTarget;
+  const cards = [
+    ["Selected GMV", fmtMoney(metrics.gmv), `${fmtNum(metrics.orders)} orders`],
+    ["Selected Products", fmtNum(state.selectedProducts.length), `${fmtNum(products.filter((product) => product.orders).length)} active`],
+    ["Avg Sold Price", fmtMoney(metrics.aov), "AOV under current filters"],
+    ["Avg Target Price", fmtMoney(avgTarget), "Weighted by orders"],
+    ["Price Gap", `${gap >= 0 ? "+" : ""}${fmtMoney(gap)}`, "Sold minus target"],
+  ];
+  host.replaceChildren(
+    ...cards.map(([label, value, sub]) => el("div", { class: "range-summary-card" }, [
+      el("span", {}, [document.createTextNode(label)]),
+      el("strong", {}, [document.createTextNode(value)]),
+      el("em", {}, [document.createTextNode(sub)]),
+    ])),
+  );
+}
+
+function drawSelectedProductPriceChart(rows) {
+  const svg = chartScaffold("#selectedProductPriceChart", "0 0 940 560", "Selected products average sold price versus target price");
+  const products = selectedProductDisplayItems(rows, 10);
+  if (!products.length || !products.some((product) => product.orders)) {
+    drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
+    return;
+  }
+  const left = 340;
+  const top = 54;
+  const width = 500;
+  const rowStep = Math.min(48, 420 / Math.max(products.length, 1));
+  const max = niceMoneyMax(Math.max(...products.flatMap((product) => [product.aov, product.cpi]), 1));
+  drawGrid(svg, left, 40, width, 420, 4, max, fmtMoney);
+  drawLegend(svg, [
+    { label: "Avg sold price", color: "#f97316", width: 142 },
+    { label: "Target price", color: "#9a5a2e", width: 120 },
+  ], left, 512, 720);
+
+  products.forEach((product, index) => {
+    const y = top + index * rowStep;
+    const soldWidth = (product.aov / max) * width;
+    const targetWidth = (product.cpi / max) * width;
+    const label = svgEl("text", { x: left - 14, y: y + 24, "text-anchor": "end", class: "product-axis-label" });
+    label.textContent = shortProductLabel(product.product, 39);
+    svg.append(label);
+
+    const target = svgEl("rect", { x: left, y: y + 4, width: targetWidth, height: 14, rx: 6, fill: "#9a5a2e", opacity: 0.68 });
+    animateRect(target, "x");
+    attachTooltip(target, `<strong>${escapeHtml(product.product)}</strong><br>Target price ${fmtMoney(product.cpi)}<br>Orders ${fmtNum(product.orders)}<br>Est. target cost ${fmtMoney(product.targetCost)}`);
+    svg.append(target);
+
+    const sold = svgEl("rect", { x: left, y: y + 24, width: soldWidth, height: 14, rx: 6, fill: "#f97316" });
+    animateRect(sold, "x");
+    attachTooltip(sold, `<strong>${escapeHtml(product.product)}</strong><br>Avg sold price ${fmtMoney(product.aov)}<br>Target price ${fmtMoney(product.cpi)}<br>Gap ${fmtMoney(product.aov - product.cpi)}`);
+    attachChartAction(sold, `${product.product} price comparison`, () => {
+      openDrilldown({ title: product.product, kicker: "Selected product price", rows: rows.filter((row) => row.product === product.product), criteria: { product: product.product } });
+    });
+    svg.append(sold);
+
+    const value = svgEl("text", { x: left + Math.max(soldWidth, targetWidth) + 10, y: y + 31, class: "axis-label" });
+    value.textContent = `${fmtMoney(product.aov)} / ${fmtMoney(product.cpi)}`;
+    svg.append(value);
+  });
+}
+
+function drawSelectedProductValueChart(rows) {
+  const svg = chartScaffold("#selectedProductValueChart", "0 0 940 560", "Selected products GMV versus estimated target cost");
+  const products = selectedProductDisplayItems(rows, 10);
+  if (!products.length || !products.some((product) => product.orders)) {
+    drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
+    return;
+  }
+  const left = 330;
+  const top = 54;
+  const width = 500;
+  const rowStep = Math.min(48, 420 / Math.max(products.length, 1));
+  const max = niceMoneyMax(Math.max(...products.flatMap((product) => [product.gmv, product.targetCost]), 1));
+  drawGrid(svg, left, 40, width, 420, 4, max, fmtMoney);
+  drawLegend(svg, [
+    { label: "GMV", color: "#f97316", width: 82 },
+    { label: "Est. target cost", color: "#477f9c", width: 142 },
+  ], left, 512, 720);
+
+  products.forEach((product, index) => {
+    const y = top + index * rowStep;
+    const gmvWidth = (product.gmv / max) * width;
+    const costWidth = (product.targetCost / max) * width;
+    const label = svgEl("text", { x: left - 14, y: y + 24, "text-anchor": "end", class: "product-axis-label" });
+    label.textContent = shortProductLabel(product.product, 37);
+    svg.append(label);
+
+    const cost = svgEl("rect", { x: left, y: y + 4, width: costWidth, height: 14, rx: 6, fill: "#477f9c", opacity: 0.72 });
+    animateRect(cost, "x");
+    attachTooltip(cost, `<strong>${escapeHtml(product.product)}</strong><br>Est. target cost ${fmtMoney(product.targetCost)}<br>Target price ${fmtMoney(product.cpi)}`);
+    svg.append(cost);
+
+    const gmv = svgEl("rect", { x: left, y: y + 24, width: gmvWidth, height: 14, rx: 6, fill: "#f97316" });
+    animateRect(gmv, "x");
+    attachTooltip(gmv, `<strong>${escapeHtml(product.product)}</strong><br>GMV ${fmtMoney(product.gmv)}<br>Orders ${fmtNum(product.orders)}<br>Buyers ${fmtNum(product.buyers)}`);
+    attachChartAction(gmv, `${product.product} GMV comparison`, () => {
+      openDrilldown({ title: product.product, kicker: "Selected product value", rows: rows.filter((row) => row.product === product.product), criteria: { product: product.product } });
+    });
+    svg.append(gmv);
+
+    const value = svgEl("text", { x: left + Math.max(gmvWidth, costWidth) + 10, y: y + 31, class: "axis-label" });
+    value.textContent = `${fmtMoney(product.gmv)} / ${fmtMoney(product.targetCost)}`;
+    svg.append(value);
+  });
+}
+
+function drawSelectedProductWeeklyChart(rows) {
+  const svg = chartScaffold("#selectedProductWeeklyChart", "0 0 940 560", "Selected products weekly GMV split");
+  const products = selectedProductDisplayItems(rows, 6).filter((product) => product.orders);
+  if (!products.length) {
+    drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
+    return;
+  }
+  const productNames = products.map((product) => product.product);
+  const weeks = activeWeekLabels();
+  const data = weeks.map((week) => {
+    const weekRows = rows.filter((row) => row.week === week);
+    const productMap = new Map(aggregateProducts(weekRows).map((item) => [item.product, item]));
+    const segments = productNames.map((product, index) => ({
+      product,
+      color: selectedProductColors[index % selectedProductColors.length],
+      gmv: productMap.get(product)?.gmv || 0,
+      orders: productMap.get(product)?.orders || 0,
+    }));
+    return { week, total: segments.reduce((sum, segment) => sum + segment.gmv, 0), segments };
+  });
+  const left = 94;
+  const top = 54;
+  const width = 760;
+  const height = 310;
+  const max = niceMoneyMax(Math.max(...data.map((week) => week.total), 1));
+  drawGrid(svg, left, top, width, height, 4, max, fmtMoney);
+  const barW = Math.min(86, width / Math.max(data.length, 1) - 26);
+  data.forEach((week, index) => {
+    const x = left + (width * (index + 0.5)) / data.length - barW / 2;
+    let yCursor = top + height;
+    week.segments.forEach((segment) => {
+      const h = (segment.gmv / max) * height;
+      if (h <= 0) return;
+      yCursor -= h;
+      const rect = svgEl("rect", { x, y: yCursor, width: barW, height: h, rx: h > 16 ? 7 : 3, fill: segment.color });
+      animateRect(rect);
+      attachTooltip(rect, `<strong>${escapeHtml(week.week)}</strong><br>${escapeHtml(segment.product)}<br>GMV ${fmtMoney(segment.gmv)}<br>Orders ${fmtNum(segment.orders)}`);
+      attachChartAction(rect, `${week.week} ${segment.product}`, () => {
+        openDrilldown({ title: segment.product, kicker: week.week, rows: rows.filter((row) => row.week === week.week && row.product === segment.product), criteria: { week: week.week, product: segment.product } });
+      });
+      svg.append(rect);
+    });
+    const label = svgEl("text", { x: x + barW / 2, y: top + height + 31, "text-anchor": "middle", class: "axis-label" });
+    label.textContent = week.week;
+    svg.append(label);
+    const value = svgEl("text", { x: x + barW / 2, y: top + height + 52, "text-anchor": "middle", class: "chart-title-note" });
+    value.textContent = fmtMoney(week.total);
+    svg.append(value);
+  });
+  drawLegend(
+    svg,
+    products.map((product, index) => ({ label: shortProductLabel(product.product, 18), color: selectedProductColors[index % selectedProductColors.length], width: 150 })),
+    left,
+    462,
+    760,
+  );
+}
+
+function renderSelectedProductsFocus(rows, comparisonRows) {
+  const hasSelection = Boolean(state.selectedProducts.length);
+  const section = document.querySelector("#selectedProductsFocus");
+  const dashboard = document.querySelector("#mainDashboard");
+  dashboard?.classList.toggle("has-product-selection", hasSelection);
+  if (!section) return hasSelection;
+  section.hidden = !hasSelection;
+  section.setAttribute("aria-hidden", hasSelection ? "false" : "true");
+  if (!hasSelection) return false;
+
+  const focusRows = state.week === "all" ? comparisonRows : rows;
+  document.querySelector("#selectedProductsEyebrow").textContent = `${fmtNum(state.selectedProducts.length)} selected · ${state.week === "all" ? "rolling scope" : state.week}`;
+  renderSelectedProductSummary(focusRows);
+  drawSelectedProductPriceChart(focusRows);
+  drawSelectedProductValueChart(focusRows);
+  drawSelectedProductWeeklyChart(comparisonRows);
+  return true;
+}
+
 function localWeekdayIndex(dateText) {
   const [year, month, day] = String(dateText).split("-").map(Number);
   const dayIndex = new Date(year, month - 1, day).getDay();
@@ -1306,7 +1623,7 @@ function setOptions() {
 }
 
 function latestWeek() {
-  return state.data.weekly[state.data.weekly.length - 1];
+  return state.data.weekly.find((week) => week.week === state.data.latest_week) || state.data.weekly[state.data.weekly.length - 1];
 }
 
 function activeWeekLabels() {
@@ -3321,19 +3638,22 @@ function render() {
   renderKpis(rows, comparisonRows);
   renderInsights(rows, comparisonRows);
   renderAlerts(comparisonRows);
-  drawWeeklyGmv(comparisonRows);
-  drawBarChart("#priceBandChart", summarizePriceBandsFromRows(rows), "band", "gmv", "#f97316", fmtMoney, "GMV by CPI target band under current filters");
-  drawPriceBandStacked(scopeRows);
-  drawPriceBandShare(scopeRows);
-  drawStackedNewReturning(buyerScopeRows);
-  drawNewReturningAovFrequency(buyerScopeRows);
-  drawBuyerRepeat(comparisonRows);
-  drawConversion(comparisonRows);
-  renderInWeekAnalysis();
-  drawWaterfallChart(comparisonRows);
-  drawCpiShareDonut(rows);
-  drawProductMomentum(comparisonRows);
-  drawWeekdayHeatmap(rows);
+  const hasProductSelection = renderSelectedProductsFocus(rows, comparisonRows);
+  if (!hasProductSelection) {
+    drawWeeklyGmv(comparisonRows);
+    drawBarChart("#priceBandChart", summarizePriceBandsFromRows(rows), "band", "gmv", "#f97316", fmtMoney, "GMV by CPI target band under current filters");
+    drawPriceBandStacked(scopeRows);
+    drawPriceBandShare(scopeRows);
+    drawStackedNewReturning(buyerScopeRows);
+    drawNewReturningAovFrequency(buyerScopeRows);
+    drawBuyerRepeat(comparisonRows);
+    drawConversion(comparisonRows);
+    renderInWeekAnalysis();
+    drawWaterfallChart(comparisonRows);
+    drawCpiShareDonut(rows);
+    drawProductMomentum(comparisonRows);
+    drawWeekdayHeatmap(rows);
+  }
   renderNewReturningTable(buyerScopeRows);
   renderTable(getCurrentRows({ ignoreProductSelection: true }));
   requestAnimationFrame(replayChartAnimations);
@@ -3483,6 +3803,7 @@ async function init() {
       render();
     });
     document.querySelector("#clearProductSelection")?.addEventListener("click", clearProductSelection);
+    document.querySelector("#clearSelectedFocus")?.addEventListener("click", clearProductSelection);
     document.querySelectorAll(".sort-button").forEach((button) => {
       button.addEventListener("click", () => {
         const nextKey = button.dataset.sort;
