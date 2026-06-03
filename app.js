@@ -49,7 +49,7 @@ const stageModeStorageKey = "homeDashboardStageModeV1";
 const broadcastDayCutoffHour = 3;
 const rollingWeekCount = 4;
 const maxKpiTiles = 10;
-const defaultSpecialRulesText = "530, 531, mayday:, *event*";
+const defaultSpecialRulesText = "530, 531, mayday, event";
 const defaultKpiTiles = ["gmv", "orders", "buyers", "aov", "wow", "gmvPerHour"];
 const kpiPanelTargets = {
   gmv: "#weeklyGmvChart",
@@ -214,7 +214,7 @@ function rowsForCriteria(criteria = {}) {
     if (criteria.product && row.product !== criteria.product) return false;
     if (criteria.date && (row.broadcast_date || row.date) !== criteria.date) return false;
     if (!criteria.product && !passesProductSelection(row)) return false;
-    if (!criteria.product && state.query && !row.product.toLowerCase().includes(state.query)) return false;
+    if (!criteria.product && state.query && !productMatchesQuery(row.product, state.query)) return false;
     if (!criteria.includeSpecial && !passesSpecialRuleMode(row)) return false;
     return true;
   });
@@ -359,31 +359,47 @@ function normalizeMatchText(value) {
     .trim();
 }
 
+function compactMatchText(value) {
+  return normalizeMatchText(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function productMatchesQuery(product, query) {
+  const productText = normalizeMatchText(product);
+  const queryText = normalizeMatchText(query);
+  if (!queryText) return true;
+  if (productText.includes(queryText)) return true;
+  return compactMatchText(productText).includes(compactMatchText(queryText));
+}
+
 function parsedSpecialRules() {
   const rawRules = String(state.specialRulesText || defaultSpecialRulesText)
-    .split(/[,\n]/)
+    .split(/[,，;\n]+/)
     .map((rule) => normalizeMatchText(rule))
     .filter(Boolean);
   const seen = new Set();
   return rawRules.flatMap((rule) => {
     const effect = rule.startsWith("-") || rule.startsWith("!") ? "except" : "include";
     const cleanRule = effect === "except" ? normalizeMatchText(rule.slice(1)) : rule;
-    const isContains = cleanRule.includes("*");
     const value = normalizeMatchText(cleanRule.replaceAll("*", ""));
-    const key = `${effect}:${isContains}:${value}`;
-    if (!value || seen.has(key)) return [];
+    const compactValue = compactMatchText(value);
+    const key = `${effect}:${compactValue || value}`;
+    if ((!value && !compactValue) || seen.has(key)) return [];
     seen.add(key);
-    return [{ value, effect, mode: isContains ? "contains" : "prefix" }];
+    return [{ value, compactValue, effect }];
   });
 }
 
 function specialRuleLabel(rule) {
-  const value = rule.mode === "contains" ? `*${rule.value}*` : rule.value;
-  return rule.effect === "except" ? `-${value}` : value;
+  return rule.effect === "except" ? `-${rule.value}` : rule.value;
 }
 
 function specialRuleMatches(rule, product) {
-  return rule.mode === "contains" ? product.includes(rule.value) : product.startsWith(rule.value);
+  if (product.includes(rule.value)) return true;
+  const compactProduct = compactMatchText(product);
+  return Boolean(rule.compactValue && compactProduct.includes(rule.compactValue));
 }
 
 function specialPurchaseMatch(row) {
@@ -1147,7 +1163,7 @@ function getFilteredRows(options = {}) {
   return data.records.filter((row) => {
     if (!ignoreWeek && state.week !== "all" && row.week !== state.week) return false;
     if (!ignorePriceBand && state.priceBand !== "all" && row.price_band !== state.priceBand) return false;
-    if (state.query && !row.product.toLowerCase().includes(state.query)) return false;
+    if (state.query && !productMatchesQuery(row.product, state.query)) return false;
     if (!ignoreProductSelection && !passesProductSelection(row)) return false;
     if (!ignoreBuyerType && state.buyerType !== "all" && row.buyer_type !== state.buyerType) return false;
     if (!includeSpecial && !passesSpecialRuleMode(row)) return false;
@@ -1564,7 +1580,7 @@ function baseRowsForWeek(label = focusWeekLabel(), options = {}) {
   return state.data.records.filter((row) => {
     if (row.week !== label) return false;
     if (state.priceBand !== "all" && row.price_band !== state.priceBand) return false;
-    if (state.query && !row.product.toLowerCase().includes(state.query)) return false;
+    if (state.query && !productMatchesQuery(row.product, state.query)) return false;
     if (!ignoreProductSelection && !passesProductSelection(row)) return false;
     if (!ignoreBuyerType && state.buyerType !== "all" && row.buyer_type !== state.buyerType) return false;
     if (!includeSpecial && !passesSpecialRuleMode(row)) return false;
@@ -1868,9 +1884,9 @@ function renderActiveFilters() {
   const ruleCount = includeCount + exceptCount;
   const ruleNote = exceptCount ? `${includeCount}+${exceptCount} except` : `${ruleCount}`;
   const modeLabel = {
-    exclude: `${ruleNote} rules excluded`,
-    only: `only ${ruleNote} rule matches`,
-    all: "rules included",
+    exclude: `${ruleNote} keywords excluded`,
+    only: `only ${ruleNote} keyword matches`,
+    all: "keywords included",
   }[state.specialRuleMode];
   const filters = [
     ["Week", state.week === "all" ? "All rolling 4 weeks" : state.week],
@@ -1951,7 +1967,7 @@ function renderSpecialPurchaseSummary() {
   if (state.specialRuleMode === "all") {
     button.disabled = true;
     host.replaceChildren(
-      el("p", { class: "special-mode-note all" }, [document.createTextNode("Special buy rules are off in Include all mode.")]),
+      el("p", { class: "special-mode-note all" }, [document.createTextNode("Special buy keywords are off in Include all mode.")]),
       el("p", {}, [document.createTextNode("Switch to Exclude or Only include when you want these keywords to affect the dashboard.")]),
     );
     return;
@@ -1960,7 +1976,7 @@ function renderSpecialPurchaseSummary() {
   if (!parsedSpecialRules().length) {
     button.disabled = true;
     host.replaceChildren(
-      el("p", { class: "special-mode-note" }, [document.createTextNode("Add one or more rules to preview matched products.")]),
+      el("p", { class: "special-mode-note" }, [document.createTextNode("Add one or more keywords to preview matched products.")]),
     );
     return;
   }
@@ -1981,7 +1997,7 @@ function renderSpecialPurchaseSummary() {
       el("strong", {}, [document.createTextNode(fmtMoney(summary.metrics.gmv))]),
       el("span", {}, [document.createTextNode(`${fmtNum(summary.metrics.orders)} orders · ${fmtNum(summary.products.length)} products matched`)]),
     ]),
-    el("p", { class: "special-rule-line" }, [document.createTextNode(ruleLabels ? `Rules: ${ruleLabels}` : "No rules entered.")]),
+    el("p", { class: "special-rule-line" }, [document.createTextNode(ruleLabels ? `Keywords: ${ruleLabels}` : "No keywords entered.")]),
     ...(top.length ? [el("ul", {}, top.map((item) =>
       el("li", {}, [
         el("span", {}, [document.createTextNode(item.product)]),
