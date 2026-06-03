@@ -51,6 +51,11 @@ const rollingWeekCount = 4;
 const maxKpiTiles = 10;
 const defaultSpecialRulesText = "530, 531, mayday, event";
 const defaultKpiTiles = ["gmv", "orders", "buyers", "aov", "wow", "gmvPerHour"];
+const specialRuleCache = {
+  text: "",
+  records: null,
+  rules: [],
+};
 const kpiPanelTargets = {
   gmv: "#weeklyGmvChart",
   orders: "#weeklyGmvChart",
@@ -374,13 +379,38 @@ function productMatchesQuery(product, query) {
   return compactMatchText(productText).includes(compactMatchText(queryText));
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function productStartsWithCode(product, code) {
+  if (!code) return false;
+  const productText = normalizeMatchText(product);
+  const pattern = new RegExp(`^${escapeRegExp(code)}(?:$|[^\\p{L}\\p{N}])`, "u");
+  return pattern.test(productText);
+}
+
+function productContainsCompactValue(product, value, compactValue) {
+  if (normalizeMatchText(product).includes(value)) return true;
+  return Boolean(compactValue && compactMatchText(product).includes(compactValue));
+}
+
+function productCatalogHasStartCode(code) {
+  const records = state.data?.records || state.baseData?.records || [];
+  return records.some((row) => productStartsWithCode(row.product, code));
+}
+
 function parsedSpecialRules() {
-  const rawRules = String(state.specialRulesText || defaultSpecialRulesText)
+  const text = String(state.specialRulesText || defaultSpecialRulesText);
+  const records = state.data?.records || state.baseData?.records || null;
+  if (specialRuleCache.text === text && specialRuleCache.records === records) return specialRuleCache.rules;
+
+  const rawRules = text
     .split(/[,，;\n]+/)
     .map((rule) => normalizeMatchText(rule))
     .filter(Boolean);
   const seen = new Set();
-  return rawRules.flatMap((rule) => {
+  const rules = rawRules.flatMap((rule) => {
     const effect = rule.startsWith("-") || rule.startsWith("!") ? "except" : "include";
     const cleanRule = effect === "except" ? normalizeMatchText(rule.slice(1)) : rule;
     const value = normalizeMatchText(cleanRule.replaceAll("*", ""));
@@ -388,8 +418,19 @@ function parsedSpecialRules() {
     const key = `${effect}:${compactValue || value}`;
     if ((!value && !compactValue) || seen.has(key)) return [];
     seen.add(key);
-    return [{ value, compactValue, effect }];
+    const numericCode = /^\d+$/.test(compactValue);
+    return [{
+      value,
+      compactValue,
+      effect,
+      numericCode,
+      hasStartCodeMatches: numericCode ? productCatalogHasStartCode(compactValue) : false,
+    }];
   });
+  specialRuleCache.text = text;
+  specialRuleCache.records = records;
+  specialRuleCache.rules = rules;
+  return rules;
 }
 
 function specialRuleLabel(rule) {
@@ -397,9 +438,11 @@ function specialRuleLabel(rule) {
 }
 
 function specialRuleMatches(rule, product) {
-  if (product.includes(rule.value)) return true;
-  const compactProduct = compactMatchText(product);
-  return Boolean(rule.compactValue && compactProduct.includes(rule.compactValue));
+  if (rule.numericCode) {
+    if (productStartsWithCode(product, rule.compactValue)) return true;
+    if (rule.hasStartCodeMatches) return false;
+  }
+  return productContainsCompactValue(product, rule.value, rule.compactValue);
 }
 
 function specialPurchaseMatch(row) {
