@@ -1353,6 +1353,15 @@ button {
   height: 520px;
 }
 
+.adaptive-donut-chart {
+  height: 430px;
+  padding: 2px 14px 14px;
+}
+
+.adaptive-donut-chart.is-compact-donut {
+  height: 520px;
+}
+
 .chart svg {
   width: 100%;
   height: 100%;
@@ -1393,7 +1402,25 @@ button {
 
 .donut-total {
   fill: var(--ink);
-  font-size: 24px;
+  font-size: 32px;
+  font-weight: 850;
+}
+
+.donut-center-sub {
+  fill: var(--muted);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.donut-scope-label {
+  fill: var(--muted);
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.donut-legend-label {
+  fill: var(--ink);
+  font-size: 17px;
   font-weight: 850;
 }
 
@@ -2160,6 +2187,11 @@ th {
     height: 360px;
     padding-left: 6px;
     padding-right: 6px;
+  }
+
+  .adaptive-donut-chart {
+    height: 520px;
+    padding: 0 4px 12px;
   }
 
   .selected-chart {

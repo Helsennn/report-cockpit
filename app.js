@@ -3035,8 +3035,25 @@ function arcPath(cx, cy, outerR, innerR, startAngle, endAngle) {
   ].join(" ");
 }
 
+function drawDonutLegend(svg, bands, total, options) {
+  const { x, y, columns = 2, columnWidth = 160, rowHeight = 34 } = options;
+  bands.forEach((band, index) => {
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const itemX = x + col * columnWidth;
+    const itemY = y + row * rowHeight;
+    svg.append(svgEl("rect", { x: itemX, y: itemY - 15, width: 18, height: 18, rx: 5, fill: bandColors[band.band] }));
+    const label = svgEl("text", { x: itemX + 28, y: itemY, class: "donut-legend-label" });
+    label.textContent = `${band.band} ${(band.gmv / total * 100).toFixed(0)}%`;
+    svg.append(label);
+  });
+}
+
 function drawCpiShareDonut(rows) {
-  const svg = chartScaffold("#cpiShareDonutChart", "0 0 940 390", "CPI band GMV share donut");
+  const host = document.querySelector("#cpiShareDonutChart");
+  const compact = (host?.clientWidth || 0) < 760;
+  host?.classList.toggle("is-compact-donut", compact);
+  const svg = chartScaffold("#cpiShareDonutChart", compact ? "0 0 760 560" : "0 0 940 430", "CPI band GMV share donut");
   const bands = summarizePriceBandsFromRows(rows).filter((band) => band.gmv > 0);
   const total = bands.reduce((sum, band) => sum + band.gmv, 0);
   if (!total) {
@@ -3044,16 +3061,29 @@ function drawCpiShareDonut(rows) {
     return;
   }
 
-  const cx = 300;
-  const cy = 190;
-  const outerR = 126;
-  const innerR = 72;
+  const layout = compact
+    ? {
+      cx: 380,
+      cy: 208,
+      outerR: 166,
+      innerR: 92,
+      legend: { x: 120, y: 420, columns: 2, columnWidth: 280, rowHeight: 34 },
+      scope: { x: 380, y: 42, anchor: "middle" },
+    }
+    : {
+      cx: 300,
+      cy: 220,
+      outerR: 170,
+      innerR: 96,
+      legend: { x: 574, y: 156, columns: 2, columnWidth: 168, rowHeight: 34 },
+      scope: { x: 574, y: 108, anchor: "start" },
+    };
   let cursor = -Math.PI / 2;
 
   bands.forEach((band) => {
     const slice = (band.gmv / total) * Math.PI * 2;
     const path = svgEl("path", {
-      d: arcPath(cx, cy, outerR, innerR, cursor, cursor + slice - 0.006),
+      d: arcPath(layout.cx, layout.cy, layout.outerR, layout.innerR, cursor, cursor + slice - 0.006),
       fill: bandColors[band.band],
       class: "animated-slice",
     });
@@ -3073,22 +3103,16 @@ function drawCpiShareDonut(rows) {
     cursor += slice;
   });
 
-  const center = svgEl("text", { x: cx, y: cy - 6, "text-anchor": "middle", class: "donut-total" });
+  const center = svgEl("text", { x: layout.cx, y: layout.cy - 7, "text-anchor": "middle", class: "donut-total" });
   center.textContent = fmtMoney(total);
   svg.append(center);
-  const sub = svgEl("text", { x: cx, y: cy + 22, "text-anchor": "middle", class: "chart-title-note" });
+  const sub = svgEl("text", { x: layout.cx, y: layout.cy + 28, "text-anchor": "middle", class: "donut-center-sub" });
   sub.textContent = "filtered GMV";
   svg.append(sub);
 
-  drawLegend(
-    svg,
-    bands.map((band) => ({ label: `${band.band} ${(band.gmv / total * 100).toFixed(0)}%`, color: bandColors[band.band], width: 126 })),
-    500,
-    96,
-    360,
-  );
+  drawDonutLegend(svg, bands, total, layout.legend);
 
-  const note = svgEl("text", { x: 842, y: 54, "text-anchor": "end", class: "chart-title-note" });
+  const note = svgEl("text", { x: layout.scope.x, y: layout.scope.y, "text-anchor": layout.scope.anchor, class: "donut-scope-label" });
   note.textContent = describeActiveScope();
   svg.append(note);
 }
@@ -4053,6 +4077,11 @@ async function init() {
         closeChartModal();
       }
     });
+    window.addEventListener("resize", debounce(() => {
+      if (!state.data || state.selectedProducts.length) return;
+      drawCpiShareDonut(getCurrentRows());
+      requestAnimationFrame(replayChartAnimations);
+    }, 160));
     document.querySelector("#resetFilters").addEventListener("click", () => {
       state.week = "all";
       state.priceBand = "all";
