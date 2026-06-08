@@ -36,6 +36,7 @@ const fmtShort = (value) =>
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(value || 0);
+const fmtShortMoney = (value) => `${value < 0 ? "-" : ""}$${fmtShort(Math.abs(value || 0))}`;
 
 const svgNS = "http://www.w3.org/2000/svg";
 const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
@@ -1506,9 +1507,10 @@ function drawSelectedProductPriceChart(rows) {
     });
     svg.append(sold);
 
-    const value = svgEl("text", { x: 900, y: y + 33, "text-anchor": "end", class: "chart-title-note" });
-    value.textContent = `${fmtMoney(product.aov)} / ${fmtMoney(product.cpi)}`;
-    svg.append(value);
+    addChartValueLabel(svg, `${fmtMoney(product.aov)} / ${fmtMoney(product.cpi)}`, 900, y + 33, {
+      anchor: "end",
+      size: "small",
+    });
   });
 }
 
@@ -1558,9 +1560,10 @@ function drawSelectedProductValueChart(rows) {
     });
     svg.append(orderMarker);
 
-    const value = svgEl("text", { x: 900, y: y + 33, "text-anchor": "end", class: "chart-title-note" });
-    value.textContent = `${fmtMoney(product.gmv)} · ${fmtNum(product.orders)} orders · ${share.toFixed(1)}%`;
-    svg.append(value);
+    addChartValueLabel(svg, `${fmtMoney(product.gmv)} · ${fmtNum(product.orders)} orders · ${share.toFixed(1)}%`, 900, y + 33, {
+      anchor: "end",
+      size: "tiny",
+    });
   });
 }
 
@@ -1640,11 +1643,10 @@ function drawSelectedProductWeeklyChart(rows) {
       });
       svg.append(rect);
 
-      if (products.length <= 12) {
-        const value = svgEl("text", { x: x + Math.min(barWidth + 6, barMax + 6), y: y + 23, class: "chart-title-note" });
-        value.textContent = fmtMoney(gmv);
-        svg.append(value);
-      }
+      addChartValueLabel(svg, fmtShortMoney(gmv), x + Math.min(barWidth + 7, barMax + 7), y + 22, {
+        anchor: "start",
+        size: "tiny",
+      });
     });
 
     const total = svgEl("text", { x: totalX, y: y + 22, class: "axis-label" });
@@ -1708,9 +1710,10 @@ function drawSelectedProductGapChart(rows) {
     });
     svg.append(rect);
 
-    const value = svgEl("text", { x: 900, y: y + 24, "text-anchor": "end", class: "axis-label" });
-    value.textContent = `${product.attainment.toFixed(0)}% (${product.gap >= 0 ? "+" : ""}${fmtMoney(product.gap)})`;
-    svg.append(value);
+    addChartValueLabel(svg, `${product.attainment.toFixed(0)}% (${product.gap >= 0 ? "+" : ""}${fmtMoney(product.gap)})`, 900, y + 24, {
+      anchor: "end",
+      size: "small",
+    });
   });
 }
 
@@ -2478,6 +2481,34 @@ function drawLegend(svg, items, x, y, maxWidth = 760) {
   });
 }
 
+function addChartValueLabel(svg, text, x, y, options = {}) {
+  if (text === null || text === undefined || text === "") return null;
+  const className = [
+    "chart-value-label",
+    options.size,
+    options.tone,
+  ].filter(Boolean).join(" ");
+  const label = svgEl("text", {
+    x,
+    y,
+    "text-anchor": options.anchor || "middle",
+    class: className,
+  });
+  label.textContent = text;
+  svg.append(label);
+  return label;
+}
+
+function addSegmentValueLabel(svg, text, x, y, width, height, options = {}) {
+  const minWidth = options.minWidth || 44;
+  const minHeight = options.minHeight || 20;
+  if (width < minWidth || height < minHeight) return null;
+  return addChartValueLabel(svg, text, x + width / 2, y + height / 2 + 5, {
+    size: options.size || "small",
+    tone: options.tone || "light",
+  });
+}
+
 function drawWeeklyGmv(rows) {
   const svg = chartScaffold("#weeklyGmvChart", "0 0 940 390", "Weekly GMV with WoW trend line");
   addDefs(svg);
@@ -2514,7 +2545,7 @@ function drawWeeklyGmv(rows) {
     svg.append(label);
 
     const value = svgEl("text", { x, y: Math.max(y - 14, top + 16), "text-anchor": "middle", class: "axis-label" });
-    value.textContent = fmtShort(d.gmv);
+    value.textContent = fmtShortMoney(d.gmv);
     svg.append(value);
 
     const wowValue = Number.isFinite(d.wow_gmv_pct) ? d.wow_gmv_pct : 0;
@@ -2540,10 +2571,11 @@ function drawWeeklyGmv(rows) {
       openCriteriaDrilldown({ title: `${d.week} WoW ${fmtMaybePct(d.wow_gmv_pct)}`, kicker: "Week", criteria: { week: d.week } });
     });
     svg.append(dot);
+    addChartValueLabel(svg, fmtMaybePct(d.wow_gmv_pct), x, Math.max(y - 12, top + 18), { size: "small" });
   });
 
-  const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
-  note.textContent = "Hover points for WoW %";
+  const note = svgEl("text", { x: left + width, y: top + height + 58, "text-anchor": "end", class: "chart-title-note" });
+  note.textContent = "Hover marks for full weekly detail";
   svg.append(note);
 }
 
@@ -2573,13 +2605,15 @@ function drawBarChart(target, rows, key, valueKey, color = "#f97316", formatter 
       });
     });
     svg.append(rect);
+    const visibleValue = formatter === fmtMoney ? fmtShortMoney(d[valueKey]) : formatter(d[valueKey]);
+    addChartValueLabel(svg, visibleValue, x + barW / 2, Math.max(y - 12, top + 18), { size: "small" });
 
     const labelNode = svgEl("text", { x: x + barW / 2, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
     labelNode.textContent = d[key];
     svg.append(labelNode);
   });
 
-  const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
+  const note = svgEl("text", { x: left + width, y: top + height + 58, "text-anchor": "end", class: "chart-title-note" });
   note.textContent = state.week === "all" ? "Current filters: rolling 4 weeks" : `Current filters: ${state.week}`;
   svg.append(note);
 }
@@ -2624,6 +2658,10 @@ function drawPriceBandStacked(rows) {
         });
       });
       svg.append(rect);
+      addSegmentValueLabel(svg, fmtShortMoney(band.gmv), x, yCursor, columnW, h, {
+        minWidth: 56,
+        minHeight: 24,
+      });
     });
 
     const label = svgEl("text", { x: x + columnW / 2, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
@@ -2631,7 +2669,7 @@ function drawPriceBandStacked(rows) {
     svg.append(label);
 
     const total = svgEl("text", { x: x + columnW / 2, y: Math.max(top + height - (week.total / max) * height - 14, top + 16), "text-anchor": "middle", class: "axis-label" });
-    total.textContent = fmtShort(week.total);
+    total.textContent = fmtShortMoney(week.total);
     svg.append(total);
   });
 }
@@ -2676,6 +2714,10 @@ function drawPriceBandShare(rows) {
         });
       });
       svg.append(rect);
+      addSegmentValueLabel(svg, `${pct.toFixed(0)}%`, x, yCursor, columnW, h, {
+        minWidth: 54,
+        minHeight: 24,
+      });
     });
 
     const label = svgEl("text", { x: x + columnW / 2, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
@@ -2721,6 +2763,10 @@ function drawStackedNewReturning(rows) {
       openCriteriaDrilldown({ title: `${d.week} New buyers`, kicker: "Buyer type", criteria: { week: d.week, buyerType: "new" } });
     });
     svg.append(newRect);
+    addSegmentValueLabel(svg, `${d.new_gmv_pct.toFixed(0)}%`, left, y, newW, rowH, {
+      minWidth: 56,
+      minHeight: 28,
+    });
 
     const returningRect = svgEl("rect", { x: left + newW, y, width: width - newW, height: rowH, rx: 10, fill: "#9a5a2e" });
     animateRect(returningRect, "x");
@@ -2729,6 +2775,10 @@ function drawStackedNewReturning(rows) {
       openCriteriaDrilldown({ title: `${d.week} Returning buyers`, kicker: "Buyer type", criteria: { week: d.week, buyerType: "returning" } });
     });
     svg.append(returningRect);
+    addSegmentValueLabel(svg, `${d.returning_gmv_pct.toFixed(0)}%`, left + newW, y, width - newW, rowH, {
+      minWidth: 56,
+      minHeight: 28,
+    });
 
     const pctLabel = svgEl("text", { x: left + width + 16, y: y + 30, class: "axis-label" });
     pctLabel.textContent = `${d.new_gmv_pct.toFixed(0)}% / ${d.returning_gmv_pct.toFixed(0)}%`;
@@ -2763,6 +2813,7 @@ function drawBuyerRepeat(rows) {
       openCriteriaDrilldown({ title: `${d.week} Buyer count`, kicker: "Week", criteria: { week: d.week } });
     });
     svg.append(bar);
+    addChartValueLabel(svg, fmtNum(d.buyers), x, Math.max(y - 12, top + 18), { size: "small" });
     const weekLabel = svgEl("text", { x, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
     weekLabel.textContent = d.week;
     svg.append(weekLabel);
@@ -2786,10 +2837,11 @@ function drawBuyerRepeat(rows) {
       openCriteriaDrilldown({ title: `${d.week} Repeat rate`, kicker: "Week", criteria: { week: d.week } });
     });
     svg.append(dot);
+    addChartValueLabel(svg, `${d.repeat_rate.toFixed(1)}%`, x, Math.max(y - 12, top + 18), { size: "small" });
   });
 
-  const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
-  note.textContent = "Hover line points for repeat rate";
+  const note = svgEl("text", { x: left + width, y: top + height + 58, "text-anchor": "end", class: "chart-title-note" });
+  note.textContent = "Hover marks for buyer detail";
   svg.append(note);
 }
 
@@ -2829,6 +2881,8 @@ function drawConversion(rows) {
         openCriteriaDrilldown({ title: `${d.week} ${label}/hr`, kicker: "Conversion proxy", criteria: { week: d.week } });
       });
       svg.append(dot);
+      const labelY = label === "Orders" ? Math.max(y - 12, top + 18) : Math.min(y + 22, top + height - 8);
+      addChartValueLabel(svg, `${d[field].toFixed(1)}/h`, x, labelY, { size: "small" });
     });
   };
 
@@ -2922,6 +2976,10 @@ function drawNewReturningAovFrequency(rows) {
         });
       });
       svg.append(dot);
+      const labelOffset = label.startsWith("Returning") ? 20 : -10;
+      addChartValueLabel(svg, metric === "AOV" ? fmtMoney(type.aov) : type.frequency.toFixed(2), x, y + labelOffset, {
+        size: "tiny",
+      });
     });
   };
 
@@ -3028,7 +3086,7 @@ function drawWaterfallChart(comparisonRows) {
 
     const valueY = Math.max(y - 12 - (index % 2 ? 0 : 8), top + 18 + (index % 2 ? 12 : 0));
     const value = svgEl("text", { x: x + barW / 2, y: valueY, "text-anchor": "middle", class: "axis-label" });
-    value.textContent = item.type === "delta" ? fmtMoney(item.value) : fmtShort(item.value);
+    value.textContent = item.type === "delta" ? fmtMoney(item.value) : fmtShortMoney(item.value);
     svg.append(value);
   });
 
@@ -3061,7 +3119,7 @@ function drawDonutLegend(svg, bands, total, options) {
     const itemY = y + row * rowHeight;
     svg.append(svgEl("rect", { x: itemX, y: itemY - 15, width: 18, height: 18, rx: 5, fill: bandColors[band.band] }));
     const label = svgEl("text", { x: itemX + 28, y: itemY, class: "donut-legend-label" });
-    label.textContent = `${band.band} ${(band.gmv / total * 100).toFixed(0)}%`;
+    label.textContent = `${band.band} ${(band.gmv / total * 100).toFixed(0)}% · ${fmtShortMoney(band.gmv)}`;
     svg.append(label);
   });
 }
@@ -3260,6 +3318,18 @@ function drawProductMomentum(comparisonRows) {
     });
     svg.append(bubble);
 
+    if (index < 8) {
+      const labelFitsRight = cx + r + 150 < left + width;
+      const labelX = labelFitsRight ? cx + r + 10 : Math.max(cx - r - 10, left + 4);
+      addChartValueLabel(
+        svg,
+        `${index + 1}. ${fmtShortMoney(item.currentGmv)} · Δ${item.delta >= 0 ? "+" : ""}${fmtShortMoney(item.delta)}`,
+        labelX,
+        Math.max(cy - r - 4, top + 18),
+        { anchor: labelFitsRight ? "start" : "end", size: "tiny" },
+      );
+    }
+
     if (index < 10 && r >= 13) {
       const rank = svgEl("text", { x: cx, y: cy + 4, "text-anchor": "middle", class: "bubble-rank" });
       rank.textContent = String(index + 1);
@@ -3346,7 +3416,7 @@ function drawWeekdayHeatmap(rows) {
           "text-anchor": "middle",
           class: intensity > 0.62 ? "heatmap-label light" : "heatmap-label",
         });
-        value.textContent = fmtShort(cell.gmv);
+        value.textContent = fmtShortMoney(cell.gmv);
         svg.append(value);
       }
     });
@@ -3519,6 +3589,7 @@ function drawDailyTrend(rows) {
       openCriteriaDrilldown({ title: `${day.label} GMV`, kicker: "Selected day", criteria: { week: focusWeekLabel(), date: day.date } });
     });
     svg.append(rect);
+    addChartValueLabel(svg, fmtShortMoney(day.gmv), x, Math.max(y - 12, top + 18), { size: "small" });
 
     const orderY = top + height - (day.orders / maxCount) * height;
     const buyerY = top + height - (day.buyers / maxCount) * height;
@@ -3537,6 +3608,8 @@ function drawDailyTrend(rows) {
       const dot = animatedDot({ cx: x, cy: y, r: 5.5, fill: color, stroke: "#fffaf4", "stroke-width": 2 });
       attachTooltip(dot, `<strong>${escapeHtml(day.label)} ${escapeHtml(label)}</strong><br>${fmtNum(day[field])}`);
       svg.append(dot);
+      const labelY = label === "orders" ? Math.max(y - 10, top + 18) : Math.min(y + 22, top + height - 8);
+      addChartValueLabel(svg, fmtNum(day[field]), x, labelY, { size: "tiny" });
     });
   };
   drawDailyLine(orderPoints, "#dc5b42", "orders", "orders");
@@ -3547,7 +3620,7 @@ function drawDailyTrend(rows) {
     { label: "Buyers", color: "#477f9c", width: 104 },
   ], left, 36, 760);
 
-  const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
+  const note = svgEl("text", { x: left + width, y: top + height + 58, "text-anchor": "end", class: "chart-title-note" });
   note.textContent = `${focusWeekLabel()} · count scale max ${fmtNum(maxCount)}`;
   svg.append(note);
 }
@@ -3583,6 +3656,10 @@ function drawDailyBuyerMix(rows) {
         openCriteriaDrilldown({ title: `${day.label} ${type.buyerType}`, kicker: "Selected day buyer mix", criteria: { week: focusWeekLabel(), date: day.date, buyerType: type.buyerType } });
       });
       svg.append(rect);
+      addSegmentValueLabel(svg, `${pct.toFixed(0)}%`, x, yCursor, columnW, h, {
+        minWidth: 42,
+        minHeight: 24,
+      });
     });
     const label = svgEl("text", { x: x + columnW / 2, y: top + height + 31, "text-anchor": "middle", class: "axis-label" });
     label.textContent = day.label;
@@ -3633,6 +3710,8 @@ function drawDailyAovFrequency(rows) {
       const dot = animatedDot({ cx: x, cy: y, r: 5.5, fill: color, stroke: "#fffaf4", "stroke-width": 2 });
       attachTooltip(dot, `<strong>${escapeHtml(day.label)} ${escapeHtml(label)}</strong><br>${formatter(day[field])}<br>GMV ${fmtMoney(day.gmv)}<br>Orders ${fmtNum(day.orders)}<br>Buyers ${fmtNum(day.buyers)}`);
       svg.append(dot);
+      const labelY = label === "AOV" ? Math.max(y - 10, 68) : Math.min(y + 22, 448);
+      addChartValueLabel(svg, formatter(day[field]), x, labelY, { size: "tiny" });
     });
   };
   drawLine(aovPoints, "#dc5b42", "AOV", "aov", fmtMoney);
@@ -3679,6 +3758,10 @@ function drawDailyCpiMix(rows) {
         openCriteriaDrilldown({ title: `${day.label} · CPI ${band.band}`, kicker: "Selected day + CPI", criteria: { week: focusWeekLabel(), date: day.date, priceBand: band.band } });
       });
       svg.append(rect);
+      addSegmentValueLabel(svg, `${pct.toFixed(0)}%`, x, yCursor, columnW, h, {
+        minWidth: 40,
+        minHeight: 24,
+      });
     });
     const label = svgEl("text", { x: x + columnW / 2, y: top + height + 31, "text-anchor": "middle", class: "axis-label" });
     label.textContent = day.label;
@@ -3724,7 +3807,7 @@ function drawSelectedDayProductLeaders(rows) {
     });
     svg.append(rect);
     const value = svgEl("text", { x: left + barW + 8, y: y + 19, class: "axis-label" });
-    value.textContent = fmtMoney(product.gmv);
+    value.textContent = `${fmtShortMoney(product.gmv)} · ${fmtNum(product.orders)} ord`;
     svg.append(value);
   });
   const note = svgEl("text", { x: 840, y: 398, "text-anchor": "end", class: "chart-title-note" });

@@ -1394,6 +1394,33 @@ button {
   font-weight: 800;
 }
 
+.chart-value-label {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 850;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: #fffaf4;
+  stroke-linejoin: round;
+  stroke-width: 5px;
+}
+
+.chart-value-label.small {
+  font-size: 12px;
+  stroke-width: 4px;
+}
+
+.chart-value-label.tiny {
+  font-size: 11px;
+  stroke-width: 3px;
+}
+
+.chart-value-label.light {
+  fill: #fffaf4;
+  stroke: rgba(61, 43, 31, 0.42);
+  stroke-width: 3px;
+}
+
 .empty-chart-label {
   fill: var(--muted);
   font-size: 17px;
