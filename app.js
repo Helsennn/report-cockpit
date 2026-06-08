@@ -1474,17 +1474,16 @@ function drawSelectedProductPriceChart(rows) {
     return;
   }
   const left = 312;
-  const top = 96;
+  const top = 124;
   const width = 420;
   const rowStep = 44;
   const plotHeight = Math.max(360, products.length * rowStep + 8);
-  const legendY = top + plotHeight + 58;
   const max = niceMoneyMax(Math.max(...products.flatMap((product) => [product.aov, product.cpi]), 1));
   drawHorizontalGrid(svg, left, top - 8, width, plotHeight + 18, 4, max, fmtMoney);
   drawLegend(svg, [
     { label: "Avg sold price", color: "#f97316", width: 142 },
     { label: "Target price", color: "#9a5a2e", width: 120 },
-  ], left, legendY, 720);
+  ], left, 48, 720);
 
   products.forEach((product, index) => {
     const y = top + index * rowStep;
@@ -1522,11 +1521,10 @@ function drawSelectedProductValueChart(rows) {
     return;
   }
   const left = 312;
-  const top = 96;
+  const top = 124;
   const width = 420;
   const rowStep = 44;
   const plotHeight = Math.max(360, products.length * rowStep + 8);
-  const legendY = top + plotHeight + 58;
   const totalGmv = products.reduce((sum, product) => sum + product.gmv, 0);
   const maxOrders = Math.max(...products.map((product) => product.orders), 1);
   const max = niceMoneyMax(Math.max(...products.map((product) => product.gmv), 1));
@@ -1534,7 +1532,7 @@ function drawSelectedProductValueChart(rows) {
   drawLegend(svg, [
     { label: "GMV contribution", color: "#f97316", width: 158 },
     { label: "Order marker", color: "#477f9c", width: 138 },
-  ], left, legendY, 720);
+  ], left, 48, 720);
 
   products.forEach((product, index) => {
     const y = top + index * rowStep;
@@ -1569,8 +1567,8 @@ function drawSelectedProductValueChart(rows) {
 function drawSelectedProductWeeklyChart(rows) {
   const products = selectedProductChartItems(rows);
   const rowStep = 38;
-  const top = 92;
-  const chartHeight = Math.max(560, top + products.length * rowStep + 96);
+  const top = 136;
+  const chartHeight = Math.max(600, top + products.length * rowStep + 96);
   const svg = chartScaffold("#selectedProductWeeklyChart", `0 0 940 ${chartHeight}`, "Selected products weekly GMV split");
   if (!products.length) {
     drawEmptyChart(svg, "No selected product rows under current filters.", 470, 280);
@@ -1594,6 +1592,13 @@ function drawSelectedProductWeeklyChart(rows) {
     ...products.flatMap((product) => weeks.map((week) => weekProductMaps.get(week)?.get(product.product)?.gmv || 0)),
     1,
   ));
+  drawLegend(
+    svg,
+    weeks.map((week, index) => ({ label: week, color: selectedProductColors[index % selectedProductColors.length], width: 108 })),
+    left,
+    48,
+    620,
+  );
 
   const header = svgEl("text", { x: left - 16, y: top - 36, "text-anchor": "end", class: "axis-label" });
   header.textContent = "Product";
@@ -1663,11 +1668,10 @@ function drawSelectedProductGapChart(rows) {
     gap: product.aov - product.cpi,
   }));
   const left = 300;
-  const top = 112;
+  const top = 136;
   const width = 440;
   const rowStep = 42;
   const plotHeight = Math.max(360, rowsWithPct.length * rowStep + 8);
-  const legendY = top + plotHeight + 58;
   const max = Math.max(125, Math.ceil(Math.max(...rowsWithPct.map((product) => product.attainment), 100) / 25) * 25);
 
   for (let value = 0; value <= max; value += 25) {
@@ -1686,7 +1690,7 @@ function drawSelectedProductGapChart(rows) {
   drawLegend(svg, [
     { label: "Below target", color: "#f97316", width: 128 },
     { label: "At / above target", color: "#5c8a4b", width: 150 },
-  ], left, legendY, 720);
+  ], left, 48, 720);
 
   rowsWithPct.forEach((product, index) => {
     const y = top + index * rowStep;
@@ -2479,11 +2483,15 @@ function drawWeeklyGmv(rows) {
   addDefs(svg);
   const data = weeklyStatsFromRows(rows);
   const left = 92;
-  const top = 38;
+  const top = 72;
   const width = 760;
-  const height = 250;
+  const height = 218;
   const max = Math.max(Math.ceil(Math.max(...data.map((d) => d.gmv), 1) / 10000) * 10000, 1);
   drawGrid(svg, left, top, width, height, 4, max, fmtMoney);
+  drawLegend(svg, [
+    { label: "GMV", color: "#f97316", width: 82 },
+    { label: "WoW %", color: "#dc5b42", width: 102 },
+  ], left, 36, 760);
   const barW = 88;
   const points = [];
   const wowValues = data.map((d) => d.wow_gmv_pct).filter(Number.isFinite);
@@ -2580,16 +2588,16 @@ function drawPriceBandStacked(rows) {
   const data = groupWeeklyPriceBands(rows);
   const svg = chartScaffold("#priceBandStackChart", "0 0 940 430", "Rolling four week CPI target band GMV stacked bars");
   const left = 92;
-  const top = 38;
+  const top = 74;
   const width = 760;
-  const height = 270;
+  const height = 238;
   const max = Math.ceil(Math.max(...data.map((d) => d.total), 1) / 10000) * 10000;
   drawGrid(svg, left, top, width, height, 4, max, fmtMoney);
   drawLegend(
     svg,
     priceBandOrder.map((band) => ({ label: band, color: bandColors[band], width: band.length > 5 ? 90 : 72 })),
     left,
-    382,
+    34,
     760,
   );
 
@@ -2632,15 +2640,15 @@ function drawPriceBandShare(rows) {
   const data = groupWeeklyPriceBands(rows);
   const svg = chartScaffold("#priceBandShareChart", "0 0 940 430", "Rolling four week CPI target band GMV percentage stacked bars");
   const left = 92;
-  const top = 38;
+  const top = 74;
   const width = 760;
-  const height = 270;
+  const height = 238;
   drawGrid(svg, left, top, width, height, 4, 100, (v) => `${v.toFixed(0)}%`);
   drawLegend(
     svg,
     priceBandOrder.map((band) => ({ label: band, color: bandColors[band], width: band.length > 5 ? 90 : 72 })),
     left,
-    382,
+    34,
     760,
   );
 
@@ -2690,13 +2698,13 @@ function drawStackedNewReturning(rows) {
     };
   });
   const left = 128;
-  const top = 42;
+  const top = 82;
   const width = 680;
   const rowH = 48;
   drawLegend(svg, [
     { label: "New GMV", color: "#f97316", width: 112 },
     { label: "Returning GMV", color: "#9a5a2e", width: 150 },
-  ], left, 342);
+  ], left, 36);
 
   data.forEach((d, i) => {
     const y = top + i * 64;
@@ -2732,11 +2740,15 @@ function drawBuyerRepeat(rows) {
   const svg = chartScaffold("#buyerRepeatChart", "0 0 940 390", "Buyer count with repeat-rate line");
   const data = weeklyStatsFromRows(rows);
   const left = 92;
-  const top = 38;
+  const top = 72;
   const width = 760;
-  const height = 260;
+  const height = 222;
   const maxBuyers = Math.max(Math.ceil(Math.max(...data.map((d) => d.buyers), 1) / 500) * 500, 1);
   drawGrid(svg, left, top, width, height, 4, maxBuyers, fmtNum);
+  drawLegend(svg, [
+    { label: "Buyers", color: "#f59e0b", width: 104 },
+    { label: "Repeat rate", color: "#5c8a4b", width: 132 },
+  ], left, 36, 760);
   const barW = 88;
   const points = [];
 
@@ -2789,9 +2801,9 @@ function drawConversion(rows) {
   }));
   const svg = chartScaffold("#conversionChart", "0 0 940 390", "Weekly orders per hour and buyers per hour");
   const left = 92;
-  const top = 38;
+  const top = 72;
   const width = 760;
-  const height = 260;
+  const height = 222;
   const max = Math.ceil(Math.max(...weekly.map((d) => d.ordersPerHour), 1) / 20) * 20;
   drawGrid(svg, left, top, width, height, 4, max, (v) => `${v.toFixed(0)}/h`);
 
@@ -2825,7 +2837,7 @@ function drawConversion(rows) {
   drawLegend(svg, [
     { label: "Orders/hr", color: "#dc5b42", width: 112 },
     { label: "Buyers/hr", color: "#9a5a2e", width: 112 },
-  ], left, 354);
+  ], left, 36);
   weekly.forEach((d, i) => {
     const x = left + (width * (i + 0.5)) / weekly.length;
     const weekLabel = svgEl("text", { x, y: top + height + 34, "text-anchor": "middle", class: "axis-label" });
@@ -2839,9 +2851,9 @@ function drawNewReturningAovFrequency(rows) {
   const svg = chartScaffold("#newReturningAovFreqChart", "0 0 940 520", "New versus returning AOV and order frequency");
   const left = 98;
   const width = 760;
-  const sectionH = 150;
-  const aovTop = 48;
-  const freqTop = 260;
+  const sectionH = 132;
+  const aovTop = 86;
+  const freqTop = 292;
   const maxAov = Math.ceil(Math.max(...weekly.flatMap((week) => week.types.map((type) => type.aov)), 1) / 5) * 5 || 5;
   const maxFreq = Math.ceil(Math.max(...weekly.flatMap((week) => week.types.map((type) => type.frequency)), 1) / 0.5) * 0.5 || 1;
   drawGrid(svg, left, aovTop, width, sectionH, 3, maxAov, fmtMoney);
@@ -2851,7 +2863,7 @@ function drawNewReturningAovFrequency(rows) {
     { label: "Returning AOV", color: "#477f9c", width: 158 },
     { label: "New freq", color: "#5c8a4b", width: 118 },
     { label: "Returning freq", color: "#89577b", width: 158 },
-  ], left, 472, 760);
+  ], left, 36, 760);
 
   const aovLabel = svgEl("text", { x: left, y: aovTop - 18, class: "chart-title-note" });
   aovLabel.textContent = "AOV ($ / order)";
@@ -2861,7 +2873,7 @@ function drawNewReturningAovFrequency(rows) {
   freqLabel.textContent = "Frequency (orders / buyer)";
   svg.append(freqLabel);
 
-  svg.append(svgEl("line", { x1: left, y1: 228, x2: left + width, y2: 228, stroke: "#ead8c6", "stroke-dasharray": "5 8" }));
+  svg.append(svgEl("line", { x1: left, y1: 252, x2: left + width, y2: 252, stroke: "#ead8c6", "stroke-dasharray": "5 8" }));
 
   const slotW = width / weekly.length;
   const aovPoints = { new: [], returning: [] };
@@ -2963,14 +2975,19 @@ function drawWaterfallChart(comparisonRows) {
   const minValue = Math.min(0, ...allValues) * 1.08;
   const maxValue = Math.max(...allValues, 1) * 1.08;
   const left = 92;
-  const top = 38;
+  const top = 74;
   const width = 760;
-  const height = 260;
+  const height = 224;
   const slot = width / items.length;
   const barW = 112;
   const yScale = (value) => top + ((maxValue - value) / (maxValue - minValue)) * height;
 
   drawGrid(svg, left, top, width, height, 4, maxValue, fmtMoney);
+  drawLegend(svg, [
+    { label: "Week total", color: "#f97316", width: 118 },
+    { label: "Positive impact", color: "#5c8a4b", width: 148 },
+    { label: "Negative impact", color: "#dc5b42", width: 150 },
+  ], left, 36, 760);
   const zeroY = yScale(0);
   svg.append(svgEl("line", { x1: left, y1: zeroY, x2: left + width, y2: zeroY, stroke: "#d9c6b5", "stroke-width": 2 }));
 
@@ -3015,7 +3032,7 @@ function drawWaterfallChart(comparisonRows) {
     svg.append(value);
   });
 
-  const note = svgEl("text", { x: left + width, y: 30, "text-anchor": "end", class: "chart-title-note" });
+  const note = svgEl("text", { x: left + width, y: 36, "text-anchor": "end", class: "chart-title-note" });
   note.textContent = `${focus.label} vs ${focus.prevLabel}`;
   svg.append(note);
 }
@@ -3189,9 +3206,9 @@ function drawProductMomentum(comparisonRows) {
   }
 
   const left = 92;
-  const top = 44;
+  const top = 78;
   const width = 760;
-  const height = 270;
+  const height = 236;
   const maxGmv = Math.max(...products.map((item) => item.currentGmv), 1);
   const maxDelta = Math.max(...products.map((item) => Math.abs(item.delta)), 1);
   const maxOrders = Math.max(...products.map((item) => item.orders), 1);
@@ -3253,7 +3270,7 @@ function drawProductMomentum(comparisonRows) {
   drawLegend(svg, [
     { label: "Positive change", color: "#5c8a4b", width: 148 },
     { label: "Negative change", color: "#dc5b42", width: 150 },
-  ], left, 392, 760);
+  ], left, 36, 760);
 }
 
 function drawWeekdayHeatmap(rows) {
@@ -3480,9 +3497,9 @@ function drawDailyTrend(rows) {
   addDefs(svg);
   const daily = dailyRowsForFocusedWeek(rows);
   const left = 92;
-  const top = 40;
+  const top = 74;
   const width = 760;
-  const height = 250;
+  const height = 224;
   const maxGmv = Math.max(Math.ceil(Math.max(...daily.map((day) => day.gmv), 1) / 2500) * 2500, 1);
   const maxCount = Math.max(Math.ceil(Math.max(...daily.map((day) => day.orders), 1) / 100) * 100, 1);
   drawGrid(svg, left, top, width, height, 4, maxGmv, fmtMoney);
@@ -3528,7 +3545,7 @@ function drawDailyTrend(rows) {
     { label: "GMV", color: "#f97316", width: 82 },
     { label: "Orders", color: "#dc5b42", width: 104 },
     { label: "Buyers", color: "#477f9c", width: 104 },
-  ], left, 356, 760);
+  ], left, 36, 760);
 
   const note = svgEl("text", { x: left + width, y: top + 14, "text-anchor": "end", class: "chart-title-note" });
   note.textContent = `${focusWeekLabel()} · count scale max ${fmtNum(maxCount)}`;
@@ -3545,9 +3562,9 @@ function drawDailyBuyerMix(rows) {
     return { date, label: shortDateLabel(date), total, types };
   });
   const left = 92;
-  const top = 44;
+  const top = 76;
   const width = 760;
-  const height = 260;
+  const height = 240;
   drawGrid(svg, left, top, width, height, 4, 100, (value) => `${value.toFixed(0)}%`);
   const columnW = Math.min(72, width / data.length - 18);
   data.forEach((day, index) => {
@@ -3574,7 +3591,7 @@ function drawDailyBuyerMix(rows) {
   drawLegend(svg, [
     { label: "New GMV", color: "#f97316", width: 108 },
     { label: "Returning GMV", color: "#9a5a2e", width: 154 },
-  ], left, 382, 760);
+  ], left, 36, 760);
 }
 
 function drawDailyAovFrequency(rows) {
@@ -3582,9 +3599,9 @@ function drawDailyAovFrequency(rows) {
   const daily = dailyRowsForFocusedWeek(rows);
   const left = 92;
   const width = 760;
-  const aovTop = 52;
-  const freqTop = 238;
-  const sectionH = 116;
+  const aovTop = 88;
+  const freqTop = 258;
+  const sectionH = 112;
   const maxAov = Math.ceil(Math.max(...daily.map((day) => day.aov), 1) / 5) * 5 || 5;
   const maxFreq = Math.ceil(Math.max(...daily.map((day) => day.ordersPerBuyer), 1) / 0.5) * 0.5 || 1;
   drawGrid(svg, left, aovTop, width, sectionH, 3, maxAov, fmtMoney);
@@ -3623,7 +3640,7 @@ function drawDailyAovFrequency(rows) {
   drawLegend(svg, [
     { label: "AOV", color: "#dc5b42", width: 82 },
     { label: "Orders / buyer", color: "#5c8a4b", width: 142 },
-  ], left, 430, 760);
+  ], left, 36, 760);
   const aovLabel = svgEl("text", { x: left, y: aovTop - 18, class: "chart-title-note" });
   aovLabel.textContent = "AOV ($ / order)";
   svg.append(aovLabel);
@@ -3642,9 +3659,9 @@ function drawDailyCpiMix(rows) {
     return { date, label: shortDateLabel(date), total, bands };
   });
   const left = 92;
-  const top = 38;
+  const top = 76;
   const width = 760;
-  const height = 270;
+  const height = 240;
   drawGrid(svg, left, top, width, height, 4, 100, (value) => `${value.toFixed(0)}%`);
   const columnW = Math.min(60, width / data.length - 18);
   data.forEach((day, index) => {
@@ -3671,7 +3688,7 @@ function drawDailyCpiMix(rows) {
     svg,
     priceBandOrder.map((band) => ({ label: band, color: bandColors[band], width: band.length > 5 ? 90 : 72 })),
     left,
-    382,
+    36,
     760,
   );
 }
@@ -3684,11 +3701,15 @@ function drawSelectedDayProductLeaders(rows) {
     return;
   }
   const left = 340;
-  const top = 40;
+  const top = 76;
   const width = 500;
   const rowH = 28;
   const gap = 10;
   const max = Math.max(...products.map((product) => product.gmv), 1);
+  drawLegend(svg, [
+    { label: "Top 3", color: "#f97316", width: 86 },
+    { label: "Other leaders", color: "#f59e0b", width: 136 },
+  ], left, 36, 600);
   products.forEach((product, index) => {
     const y = top + index * (rowH + gap);
     const label = svgEl("text", { x: left - 12, y: y + 19, "text-anchor": "end", class: "product-axis-label" });
